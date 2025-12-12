@@ -144,6 +144,73 @@ func sliceRoleUpdate(data []byte) *Event {
 	}
 }
 
+func ExtractOp(data []byte) int {
+	val := extractU64Field(data, "op")
+	return int(val)
+}
+
+func ExtractSeq(data []byte) uint64 {
+	return extractU64Field(data, "s")
+}
+
+func ExtractType(data []byte) string {
+	return findJSONValue(data, []string{"t"})
+}
+
+func ExtractData(data []byte) []byte {
+	// This is a bit more complex as "d" can be an object or array.
+	// We need to find "d": and then extract the value.
+	// findJSONValue returns string, but we want []byte of the raw JSON.
+
+	// Re-implement finding "d" to return the raw bytes including braces
+	searchKey := []byte(`"d":`)
+	idx := findBytes(data, searchKey)
+	if idx == -1 {
+		return nil
+	}
+
+	current := data[idx+len(searchKey):]
+	for len(current) > 0 && (current[0] == ' ' || current[0] == '\t' || current[0] == '\n') {
+		current = current[1:]
+	}
+
+	if len(current) == 0 {
+		return nil
+	}
+
+	if current[0] == '{' {
+		end := findMatchingBrace(current)
+		if end != -1 {
+			return current[:end+1]
+		}
+	} else if current[0] == '[' {
+		// Handle array if needed, though events are usually objects
+		// For now assuming object as per SliceEvent usage
+		// But let's be safe and implement findMatchingBracket
+		end := findMatchingBracket(current)
+		if end != -1 {
+			return current[:end+1]
+		}
+	}
+
+	return nil
+}
+
+func findMatchingBracket(data []byte) int {
+	depth := 0
+	for i, b := range data {
+		if b == '[' {
+			depth++
+		} else if b == ']' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func extractU64Field(data []byte, keys ...string) uint64 {
 	s := findJSONValue(data, keys)
 	if s == "" {

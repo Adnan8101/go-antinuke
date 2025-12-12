@@ -9,6 +9,8 @@ import (
 	"go-antinuke-2.0/internal/forensics"
 	"go-antinuke-2.0/internal/logging"
 	"go-antinuke-2.0/internal/state"
+	"go-antinuke-2.0/internal/sys"
+	"go-antinuke-2.0/pkg/util"
 )
 
 type DecisionEngine struct {
@@ -36,6 +38,9 @@ func NewDecisionEngine(alertQueue *correlator.AlertQueue, jobQueue *JobQueue, cp
 }
 
 func (de *DecisionEngine) Start() {
+	if err := sys.PinToCore(de.cpuCore); err != nil {
+		logging.Warn("Failed to pin decision engine to core %d: %v", de.cpuCore, err)
+	}
 	runtime.LockOSThread()
 	de.running = true
 	de.runLoop()
@@ -49,13 +54,13 @@ func (de *DecisionEngine) runLoop() {
 			continue
 		}
 
-		fmt.Printf("[DECISION] Alert received! Actor=%d, Flags=%d, PanicMode=%d\n", alert.ActorID, alert.Flags, alert.PanicMode)
+		// fmt.Printf("[DECISION] Alert received! Actor=%d, Flags=%d, PanicMode=%d\n", alert.ActorID, alert.Flags, alert.PanicMode)
 		incident := de.processAlert(alert)
 		if incident != nil {
-			fmt.Printf("[DECISION] Executing ban for actor %d\n", incident.ActorID)
+			// fmt.Printf("[DECISION] Executing ban for actor %d\n", incident.ActorID)
 			de.executeDecision(incident)
 		} else {
-			fmt.Printf("[DECISION] No incident created\n")
+			// fmt.Printf("[DECISION] No incident created\n")
 		}
 	}
 }
@@ -95,7 +100,7 @@ func (de *DecisionEngine) executeDecision(incident *IncidentPacket) {
 	// In panic mode, immediately kick the user to stop ongoing actions
 	// Kick is faster than ban and removes them from server instantly
 	if incident.PanicMode == 1 && shouldBan {
-		fmt.Printf("[DECISION] PANIC MODE - Issuing immediate kick for actor %d\n", incident.ActorID)
+		// fmt.Printf("[DECISION] PANIC MODE - Issuing immediate kick for actor %d\n", incident.ActorID)
 		kickJob := NewKickJob(incident.GuildID, incident.ActorID, "PANIC MODE - Immediate Removal")
 		de.jobQueue.Enqueue(kickJob)
 	}
@@ -228,6 +233,7 @@ type JobQueue struct {
 	mask uint32
 	head uint32
 	tail uint32
+	_    [52]byte // Padding to avoid false sharing
 }
 
 func NewJobQueue(size uint32) *JobQueue {
@@ -241,21 +247,27 @@ func NewJobQueue(size uint32) *JobQueue {
 }
 
 func (jq *JobQueue) Enqueue(job *Job) bool {
-	nextHead := (jq.head + 1) & jq.mask
-	if nextHead == jq.tail {
+	head := util.AtomicLoadU32(&jq.head)
+	tail := util.AtomicLoadU32(&jq.tail)
+
+	nextHead := (head + 1) & jq.mask
+	if nextHead == tail {
 		return false
 	}
-	jq.jobs[jq.head] = *job
-	jq.head = nextHead
+	jq.jobs[head] = *job
+	util.AtomicStoreU32(&jq.head, nextHead)
 	return true
 }
 
 func (jq *JobQueue) Dequeue() (*Job, bool) {
-	if jq.tail == jq.head {
+	head := util.AtomicLoadU32(&jq.head)
+	tail := util.AtomicLoadU32(&jq.tail)
+
+	if tail == head {
 		return nil, false
 	}
-	job := &jq.jobs[jq.tail]
-	jq.tail = (jq.tail + 1) & jq.mask
+	job := &jq.jobs[tail]
+	util.AtomicStoreU32(&jq.tail, (tail+1)&jq.mask)
 	return job, true
 }
 

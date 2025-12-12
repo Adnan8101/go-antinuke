@@ -8,6 +8,7 @@ import (
 	"go-antinuke-2.0/internal/decision"
 	"go-antinuke-2.0/internal/notifier"
 	"go-antinuke-2.0/internal/state"
+	"go-antinuke-2.0/internal/sys"
 	"go-antinuke-2.0/pkg/util"
 )
 
@@ -35,6 +36,9 @@ func NewRESTWorker(jobQueue *decision.JobQueue, httpPool *HTTPPool, rateLimiter 
 
 func (rw *RESTWorker) Start() {
 	if rw.cpuCore > 0 {
+		if err := sys.PinToCore(rw.cpuCore); err != nil {
+			// logging.Warn("Failed to pin REST worker to core %d: %v", rw.cpuCore, err)
+		}
 		runtime.LockOSThread()
 	}
 	rw.running = true
@@ -74,7 +78,7 @@ func (rw *RESTWorker) handleBanFailure(actorID uint64) {
 	if actorIndex != 0 {
 		as := state.GetActorState()
 		as.SetBanned(actorIndex, false)
-		fmt.Printf("[DISPATCHER] Ban failed for actor %d, cleared banned state\n", actorID)
+		// fmt.Printf("[DISPATCHER] Ban failed for actor %d, cleared banned state\n", actorID)
 	}
 }
 

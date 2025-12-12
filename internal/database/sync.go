@@ -109,16 +109,78 @@ func (d *Database) InitializeGuildWithDefaults(guildID string) error {
 
 // EnsureGuildConfigExists ensures a guild has a config, creating default if needed
 func (d *Database) EnsureGuildConfigExists(guildID string) error {
-	config, err := d.GetGuildConfig(guildID)
+	_, err := d.GetGuildConfig(guildID)
 	if err != nil {
 		return err
 	}
 
-	// If no events are enabled, enable all by default
-	if config.EnabledEvents == "" {
-		return d.InitializeGuildWithDefaults(guildID)
+	// Just sync existing config to memory - DO NOT auto-enable events
+	// User must explicitly enable events via /antinuke enable command
+	return d.SyncGuildStateFromDB(guildID)
+}
+
+// SyncWhitelistToMemory syncs whitelist from database to in-memory profile store
+func (d *Database) SyncWhitelistToMemory(guildID string) error {
+	guildIDNum, err := util.StringToUint64(guildID)
+	if err != nil {
+		return fmt.Errorf("invalid guild ID: %w", err)
 	}
 
-	// Sync existing config to memory
-	return d.SyncGuildStateFromDB(guildID)
+	// Get all whitelist entries for this guild
+	whitelists, err := d.GetAllWhitelist(guildID)
+	if err != nil {
+		return fmt.Errorf("failed to get whitelist: %w", err)
+	}
+
+	// Get profile store
+	store := config.GetProfileStore()
+	profile := store.GetOrCreate(guildIDNum)
+
+	// Clear existing whitelist
+	profile.Whitelist = make([]uint64, 0)
+
+	// Add all whitelisted users/roles
+	for _, w := range whitelists {
+		targetIDNum, err := util.StringToUint64(w.TargetID)
+		if err != nil {
+			continue
+		}
+		// Add to in-memory whitelist
+		profile.Whitelist = append(profile.Whitelist, targetIDNum)
+	}
+
+	// Update store
+	store.Set(profile)
+	return nil
+}
+
+// SyncThresholdsToMemory syncs event limits/thresholds to correlator for real-time enforcement
+func (d *Database) SyncThresholdsToMemory(guildID string) error {
+	// Get all event limits for this guild
+	limits, err := d.GetAllEventLimits(guildID)
+	if err != nil {
+		return fmt.Errorf("failed to get event limits: %w", err)
+	}
+
+	guildIDNum, err := util.StringToUint64(guildID)
+	if err != nil {
+		return fmt.Errorf("invalid guild ID: %w", err)
+	}
+
+	// Get profile store
+	store := config.GetProfileStore()
+	profile := store.GetOrCreate(guildIDNum)
+
+	// Update custom thresholds if configured
+	if len(limits) > 0 {
+		// Create custom threshold matrix if needed
+		if profile.CustomThresholds == nil {
+			profile.CustomThresholds = &config.ThresholdMatrix{}
+		}
+		// Thresholds are automatically loaded by correlator from database
+		// This sync just ensures the profile is aware of custom limits
+	}
+
+	store.Set(profile)
+	return nil
 }

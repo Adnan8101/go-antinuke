@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go-antinuke-2.0/internal/sys"
 )
 
 type GatewayReader struct {
@@ -100,6 +101,9 @@ func (g *GatewayReader) heartbeatLoop() {
 }
 
 func (g *GatewayReader) ReadLoop() error {
+	if err := sys.PinToCore(g.cpuCore); err != nil {
+		fmt.Printf("Failed to pin ingest thread to core %d: %v\n", g.cpuCore, err)
+	}
 	runtime.LockOSThread()
 
 	for {
@@ -126,25 +130,25 @@ func (g *GatewayReader) ReadLoop() error {
 }
 
 func (g *GatewayReader) processMessage(data []byte) {
-	var raw struct {
-		Op int             `json:"op"`
-		S  uint64          `json:"s"`
-		T  string          `json:"t"`
-		D  json.RawMessage `json:"d"`
+	op := ExtractOp(data)
+
+	// Update sequence number if present
+	s := ExtractSeq(data)
+	if s > 0 {
+		atomic.StoreUint64(&g.sequenceNum, s)
 	}
 
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return
-	}
-
-	if raw.S > 0 {
-		atomic.StoreUint64(&g.sequenceNum, raw.S)
-	}
-
-	if raw.Op == 0 && raw.T != "" {
-		event := SliceEvent(raw.T, raw.D)
-		if event != nil && event.Priority >= 2 {
-			g.eventQueue.Enqueue(event)
+	// Dispatch event
+	if op == 0 {
+		t := ExtractType(data)
+		if t != "" {
+			d := ExtractData(data)
+			if d != nil {
+				event := SliceEvent(t, json.RawMessage(d))
+				if event != nil && event.Priority >= 2 {
+					g.eventQueue.Enqueue(event)
+				}
+			}
 		}
 	}
 }

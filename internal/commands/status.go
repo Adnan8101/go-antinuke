@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"go-antinuke-2.0/internal/database"
 
@@ -10,6 +11,16 @@ import (
 )
 
 func handleStatus(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	// Check permissions
+	allowed, err := checkPermissions(s, i)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		respondPermissionError(s, i, "You need Administrator permission and a role higher than the bot.")
+		return nil
+	}
+
 	guildID := i.GuildID
 
 	db := database.GetDB()
@@ -28,10 +39,14 @@ func handleStatus(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 		return fmt.Errorf("failed to fetch guild configuration: %w", err)
 	}
 
-	// Panic mode status directly from database
-	panicStatus := "Disabled"
-	if guildConfig.PanicMode {
-		panicStatus = "**ENABLED** (Instant ban on first detection)"
+	// Security level based on enabled events and panic mode
+	securityLevel := "Disabled"
+	if guildConfig.EnabledEvents != "" {
+		if guildConfig.PanicMode {
+			securityLevel = "**MAXIMUM** (Panic Mode Active)"
+		} else {
+			securityLevel = "**Enabled**"
+		}
 	}
 
 	// Get event types
@@ -72,41 +87,52 @@ func handleStatus(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "Anti-Nuke System Status",
-		Description: "Current configuration and protection status",
-		Color:       0x5865F2,
+		Title:       "System Status Overview",
+		Description: "Real-time security configuration and operational status.",
+		Color:       0x2B2D31,
 		Fields: []*discordgo.MessageEmbedField{
 			{
-				Name:   "Panic Mode",
-				Value:  panicStatus,
+				Name:   "Security Level",
+				Value:  securityLevel,
 				Inline: false,
 			},
 			{
-				Name:   "Log Channel",
+				Name:   "Audit Logging",
 				Value:  logChannelText,
 				Inline: false,
 			},
 			{
-				Name:   "Enabled Events",
+				Name:   "Active Protection Modules",
 				Value:  enabledText,
 				Inline: true,
 			},
 			{
-				Name:   "Disabled Events",
+				Name:   "Disabled Modules",
 				Value:  disabledText,
 				Inline: true,
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Ultra-Low-Latency Anti-Nuke System",
+			Text: "Anti-Nuke Security Systems • Enterprise Grade Protection",
 		},
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{embed},
-			Flags:  discordgo.MessageFlagsEphemeral,
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Label:    "Refresh Status",
+							Style:    discordgo.PrimaryButton,
+							CustomID: "status_refresh",
+						},
+					},
+				},
+			},
 		},
 	})
 }

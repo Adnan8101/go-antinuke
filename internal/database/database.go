@@ -128,6 +128,34 @@ func (d *Database) createTables() error {
 
 	CREATE INDEX IF NOT EXISTS idx_banned_users_guild ON banned_users(guild_id);
 	CREATE INDEX IF NOT EXISTS idx_banned_users_user ON banned_users(user_id);
+
+	CREATE TABLE IF NOT EXISTS event_limits (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		event_type INTEGER NOT NULL,
+		max_actions INTEGER DEFAULT 3,
+		time_window INTEGER DEFAULT 10,
+		punishment TEXT DEFAULT 'ban',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		UNIQUE(guild_id, event_type),
+		FOREIGN KEY (event_type) REFERENCES event_types(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_event_limits_guild ON event_limits(guild_id);
+
+	CREATE TABLE IF NOT EXISTS whitelist (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		guild_id TEXT NOT NULL,
+		target_id TEXT NOT NULL,
+		target_type TEXT NOT NULL,
+		event_type INTEGER DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		UNIQUE(guild_id, target_id, event_type)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_whitelist_guild ON whitelist(guild_id);
+	CREATE INDEX IF NOT EXISTS idx_whitelist_target ON whitelist(guild_id, target_id);
 	`
 
 	_, err := d.db.Exec(schema)
@@ -329,6 +357,151 @@ func (d *Database) RemoveBannedUser(guildID, userID string) error {
 		guildID, userID,
 	)
 	return err
+}
+
+// ===== Event Limits =====
+
+// UpsertEventLimit creates or updates an event limit
+func (d *Database) UpsertEventLimit(limit *EventLimit) error {
+	now := time.Now().Unix()
+	limit.UpdatedAt = now
+	if limit.CreatedAt == 0 {
+		limit.CreatedAt = now
+	}
+
+	_, err := d.db.Exec(
+		`INSERT OR REPLACE INTO event_limits (guild_id, event_type, max_actions, time_window, punishment, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		limit.GuildID, limit.EventType, limit.MaxActions, limit.TimeWindow, limit.Punishment, limit.CreatedAt, limit.UpdatedAt,
+	)
+	return err
+}
+
+// GetEventLimit retrieves an event limit for a specific event type
+func (d *Database) GetEventLimit(guildID string, eventType int) (*EventLimit, error) {
+	var limit EventLimit
+	err := d.db.QueryRow(
+		`SELECT id, guild_id, event_type, max_actions, time_window, punishment, created_at, updated_at
+		 FROM event_limits WHERE guild_id = ? AND event_type = ?`,
+		guildID, eventType,
+	).Scan(&limit.ID, &limit.GuildID, &limit.EventType, &limit.MaxActions, &limit.TimeWindow, &limit.Punishment, &limit.CreatedAt, &limit.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		// Return default limits
+		return &EventLimit{
+			GuildID:    guildID,
+			EventType:  eventType,
+			MaxActions: 3,
+			TimeWindow: 10,
+			Punishment: "ban",
+		}, nil
+	}
+
+	return &limit, err
+}
+
+// GetAllEventLimits retrieves all event limits for a guild
+func (d *Database) GetAllEventLimits(guildID string) ([]*EventLimit, error) {
+	rows, err := d.db.Query(
+		`SELECT id, guild_id, event_type, max_actions, time_window, punishment, created_at, updated_at
+		 FROM event_limits WHERE guild_id = ?`,
+		guildID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var limits []*EventLimit
+	for rows.Next() {
+		var limit EventLimit
+		if err := rows.Scan(&limit.ID, &limit.GuildID, &limit.EventType, &limit.MaxActions, &limit.TimeWindow, &limit.Punishment, &limit.CreatedAt, &limit.UpdatedAt); err != nil {
+			return nil, err
+		}
+		limits = append(limits, &limit)
+	}
+
+	return limits, rows.Err()
+}
+
+// ===== Whitelist =====
+
+// AddWhitelist adds a user/role to the whitelist
+func (d *Database) AddWhitelist(guildID, targetID, targetType string, eventType int) error {
+	_, err := d.db.Exec(
+		`INSERT OR IGNORE INTO whitelist (guild_id, target_id, target_type, event_type, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		guildID, targetID, targetType, eventType, time.Now().Unix(),
+	)
+	return err
+}
+
+// RemoveWhitelist removes a user/role from the whitelist
+func (d *Database) RemoveWhitelist(guildID, targetID string, eventType int) error {
+	_, err := d.db.Exec(
+		`DELETE FROM whitelist WHERE guild_id = ? AND target_id = ? AND event_type = ?`,
+		guildID, targetID, eventType,
+	)
+	return err
+}
+
+// IsWhitelisted checks if a user/role is whitelisted for an event
+func (d *Database) IsWhitelisted(guildID, targetID string, eventType int) bool {
+	var count int
+	// Check for specific event or all events (event_type = 0)
+	err := d.db.QueryRow(
+		`SELECT COUNT(*) FROM whitelist WHERE guild_id = ? AND target_id = ? AND (event_type = ? OR event_type = 0)`,
+		guildID, targetID, eventType,
+	).Scan(&count)
+	return err == nil && count > 0
+}
+
+// GetWhitelistByTarget retrieves all whitelist entries for a specific target
+func (d *Database) GetWhitelistByTarget(guildID, targetID string) ([]*Whitelist, error) {
+	rows, err := d.db.Query(
+		`SELECT id, guild_id, target_id, target_type, event_type, created_at
+		 FROM whitelist WHERE guild_id = ? AND target_id = ?`,
+		guildID, targetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []*Whitelist
+	for rows.Next() {
+		var entry Whitelist
+		if err := rows.Scan(&entry.ID, &entry.GuildID, &entry.TargetID, &entry.TargetType, &entry.EventType, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &entry)
+	}
+
+	return entries, rows.Err()
+}
+
+// GetAllWhitelist retrieves all whitelist entries for a guild
+func (d *Database) GetAllWhitelist(guildID string) ([]*Whitelist, error) {
+	rows, err := d.db.Query(
+		`SELECT id, guild_id, target_id, target_type, event_type, created_at
+		 FROM whitelist WHERE guild_id = ?`,
+		guildID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []*Whitelist
+	for rows.Next() {
+		var entry Whitelist
+		if err := rows.Scan(&entry.ID, &entry.GuildID, &entry.TargetID, &entry.TargetType, &entry.EventType, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &entry)
+	}
+
+	return entries, rows.Err()
 }
 
 // GetBannedUsers retrieves all banned users for a guild

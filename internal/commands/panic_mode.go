@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	cfg "go-antinuke-2.0/internal/config"
 	"go-antinuke-2.0/internal/database"
@@ -10,16 +11,23 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// handlePanicMode handles the /panic mode command
+// handlePanicMode handles the /panic command
 func handlePanicMode(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	// Check permissions - Owner only for panic mode
+	isOwner, err := checkOwnerOnly(s, i)
+	if err != nil {
+		return err
+	}
+	if !isOwner {
+		respondPermissionError(s, i, "Only the server owner can toggle panic mode")
+		return nil
+	}
+
 	data := i.ApplicationCommandData()
 	guildID := i.GuildID
 
-	// Get the state option from the subcommand
-	options := data.Options[0].Options // "mode" subcommand options
-	state := options[0].StringValue()  // "enable" or "disable"
-
-	panicMode := state == "enable"
+	// Get the enable option directly
+	panicMode := data.Options[0].BoolValue()
 
 	// Save to database
 	db := database.GetDB()
@@ -43,50 +51,52 @@ func handlePanicMode(s *discordgo.Session, i *discordgo.InteractionCreate) error
 	var embed *discordgo.MessageEmbed
 	if panicMode {
 		embed = &discordgo.MessageEmbed{
-			Title:       "⚠️ PANIC MODE ENABLED",
-			Description: "**Ultra-Aggressive Protection Activated**",
-			Color:       0xED4245, // Red
+			Title:       "⚠️ PANIC MODE ACTIVATED",
+			Description: "**Maximum Security Protocol Engaged**",
+			Color:       0xED4245,
 			Fields: []*discordgo.MessageEmbedField{
 				{
-					Name:   "🚨 Enforcement Policy",
-					Value:  "**INSTANT BAN** on ANY detection (even 1 count)\nNo warnings, no thresholds, immediate action",
+					Name:   "Enforcement Policy",
+					Value:  "**ZERO TOLERANCE**\nImmediate ban on any detected anomaly.\nAll thresholds bypassed.",
 					Inline: false,
 				},
 				{
-					Name:   "⚡ Detection Speed",
-					Value:  "Target: <1µs detection → <200ms execution",
+					Name:   "System Latency",
+					Value:  "Optimized for <1µs detection",
 					Inline: false,
 				},
 				{
-					Name:   "⚠️ Warning",
-					Value:  "This mode is extremely aggressive. Use with caution.",
+					Name:   "Warning",
+					Value:  "This mode is extremely aggressive. Legitimate actions may be flagged.",
 					Inline: false,
 				},
 			},
 			Footer: &discordgo.MessageEmbedFooter{
-				Text: "Panic Mode Active",
+				Text: "Anti-Nuke Security Systems • Enterprise Grade Protection",
 			},
+			Timestamp: time.Now().Format(time.RFC3339),
 		}
 	} else {
 		embed = &discordgo.MessageEmbed{
-			Title:       "✅ Normal Mode Enabled",
-			Description: "Standard protection with configured thresholds",
-			Color:       0x57F287, // Green
+			Title:       "Standard Protection Active",
+			Description: "System returned to standard operational parameters.",
+			Color:       0x2B2D31,
 			Fields: []*discordgo.MessageEmbedField{
 				{
-					Name:   "📊 Enforcement Policy",
-					Value:  "Following configured rate limits and thresholds\nWarnings and gradual escalation enabled",
+					Name:   "Enforcement Policy",
+					Value:  "Standard rate limits and thresholds applied.\nGradual escalation enabled.",
 					Inline: false,
 				},
 				{
-					Name:   "⚙️ Configuration",
-					Value:  "Use `/antinuke enable` to configure event protection",
+					Name:   "Configuration",
+					Value:  "Use `/antinuke enable` to manage specific modules.",
 					Inline: false,
 				},
 			},
 			Footer: &discordgo.MessageEmbedFooter{
-				Text: "Normal Mode Active",
+				Text: "Anti-Nuke Security Systems • Enterprise Grade Protection",
 			},
+			Timestamp: time.Now().Format(time.RFC3339),
 		}
 	}
 

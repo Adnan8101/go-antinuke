@@ -61,7 +61,35 @@ func (h *Handler) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	var err error
 	switch data.Name {
 	case "antinuke":
-		err = handleAntiNukeEnable(s, i)
+		// Handle subcommands
+		if len(data.Options) > 0 {
+			switch data.Options[0].Name {
+			case "enable":
+				err = handleEventsEnable(s, i)
+			case "disable":
+				err = handleEventsDisable(s, i)
+			case "whitelist":
+				if len(data.Options[0].Options) > 0 {
+					switch data.Options[0].Options[0].Name {
+					case "add":
+						err = handleWhitelistAdd(s, i)
+					case "remove":
+						err = handleWhitelistRemove(s, i)
+					case "view":
+						err = handleWhitelistView(s, i)
+					}
+				}
+			}
+		}
+	case "set":
+		if len(data.Options) > 0 {
+			switch data.Options[0].Name {
+			case "limit":
+				err = handleSetLimit(s, i)
+			}
+		}
+	case "setpunishment":
+		err = handleSetPunishment(s, i)
 	case "panic":
 		err = handlePanicMode(s, i)
 	case "logs":
@@ -84,11 +112,23 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 
 	var err error
 	switch {
-	case data.CustomID == "antinuke_event_select":
-		err = handleEventSelect(s, i)
-	case data.CustomID == "antinuke_enable_all":
-		err = handleEnableAll(s, i)
+	// Enable Events
+	case data.CustomID == "events_enable_add_all":
+		err = handleEventsEnableAddAll(s, i)
+
+	// Disable Events
+	case data.CustomID == "events_disable_all":
+		err = handleEventsDisableAll(s, i)
+
+	// Whitelist
+	case strings.HasPrefix(data.CustomID, "wl_add_all_"):
+		err = handleWhitelistAddAll(s, i)
+	case strings.HasPrefix(data.CustomID, "whitelist_remove_all_"):
+		err = handleWhitelistRemoveAll(s, i)
+
 	default:
+		// Fallback for existing components
+		// These handlers were removed/renamed, so we just log error
 		err = fmt.Errorf("unknown component: %s", data.CustomID)
 	}
 
@@ -98,70 +138,7 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 	}
 }
 
-// GetAllCommands returns all slash command definitions
-func GetAllCommands() []*discordgo.ApplicationCommand {
-	return []*discordgo.ApplicationCommand{
-		{
-			Name:        "antinuke",
-			Description: "Configure anti-nuke event protection",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Name:        "enable",
-					Description: "Enable and configure anti-nuke events",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-				},
-			},
-		},
-		{
-			Name:        "panic",
-			Description: "Configure anti-nuke panic mode",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Name:        "mode",
-					Description: "Set panic mode (instant ban on any detection)",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Name:        "state",
-							Description: "Enable or disable panic mode",
-							Type:        discordgo.ApplicationCommandOptionString,
-							Required:    true,
-							Choices: []*discordgo.ApplicationCommandOptionChoice{
-								{Name: "Enable", Value: "enable"},
-								{Name: "Disable", Value: "disable"},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			Name:        "logs",
-			Description: "Configure anti-nuke logging",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Name:        "enable",
-					Description: "Set the channel for anti-nuke logs",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Name:        "channel",
-							Description: "Channel to send logs to",
-							Type:        discordgo.ApplicationCommandOptionChannel,
-							Required:    true,
-						},
-					},
-				},
-			},
-		},
-		{
-			Name:        "status",
-			Description: "View current anti-nuke system status and configuration",
-		},
-	}
-}
-
-// respondError sends an error response to the user
+// respondError sends an ephemeral error message
 func respondError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,

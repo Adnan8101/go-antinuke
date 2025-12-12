@@ -1,5 +1,9 @@
 package correlator
 
+import (
+	"go-antinuke-2.0/pkg/util"
+)
+
 type Alert struct {
 	GuildID   uint64
 	ActorID   uint64
@@ -39,35 +43,44 @@ func (aq *AlertQueue) Get() *Alert {
 }
 
 func (aq *AlertQueue) Enqueue(alert *Alert) bool {
-	nextHead := (aq.head + 1) & aq.mask
-	if nextHead == aq.tail {
+	head := util.AtomicLoadU32(&aq.head)
+	tail := util.AtomicLoadU32(&aq.tail)
+
+	nextHead := (head + 1) & aq.mask
+	if nextHead == tail {
 		return false
 	}
 
-	aq.alerts[aq.head] = *alert
-	aq.head = nextHead
+	aq.alerts[head] = *alert
+	util.AtomicStoreU32(&aq.head, nextHead)
 	return true
 }
 
 func (aq *AlertQueue) Dequeue() (*Alert, bool) {
-	if aq.tail == aq.head {
+	head := util.AtomicLoadU32(&aq.head)
+	tail := util.AtomicLoadU32(&aq.tail)
+
+	if tail == head {
 		return nil, false
 	}
 
-	alert := &aq.alerts[aq.tail]
-	aq.tail = (aq.tail + 1) & aq.mask
+	alert := &aq.alerts[tail]
+	util.AtomicStoreU32(&aq.tail, (tail+1)&aq.mask)
 	return alert, true
 }
 
 func (aq *AlertQueue) IsEmpty() bool {
-	return aq.head == aq.tail
+	return util.AtomicLoadU32(&aq.head) == util.AtomicLoadU32(&aq.tail)
 }
 
 func (aq *AlertQueue) Size() uint32 {
-	if aq.head >= aq.tail {
-		return aq.head - aq.tail
+	head := util.AtomicLoadU32(&aq.head)
+	tail := util.AtomicLoadU32(&aq.tail)
+
+	if head >= tail {
+		return head - tail
 	}
-	return (aq.mask + 1) - (aq.tail - aq.head)
+	return (aq.mask + 1) - (tail - head)
 }
 
 func nextPowerOf2Alert(n uint32) uint32 {

@@ -10,6 +10,28 @@ type GuildConfig struct {
 	UpdatedAt     int64
 }
 
+// EventLimit represents rate limit configuration for an event
+type EventLimit struct {
+	ID         int64
+	GuildID    string
+	EventType  int
+	MaxActions int    // Maximum number of actions allowed
+	TimeWindow int    // Time window in seconds
+	Punishment string // "kick", "ban", "timeout"
+	CreatedAt  int64
+	UpdatedAt  int64
+}
+
+// Whitelist represents whitelisted users/roles for specific events
+type Whitelist struct {
+	ID         int64
+	GuildID    string
+	TargetID   string // User ID or Role ID
+	TargetType string // "user" or "role"
+	EventType  int    // Event type ID, 0 means all events
+	CreatedAt  int64
+}
+
 // EventLog represents a logged event
 type EventLog struct {
 	ID               int64

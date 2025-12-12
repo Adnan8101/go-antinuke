@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	"go-antinuke-2.0/internal/database"
 
@@ -10,6 +11,16 @@ import (
 
 // handleLogsEnable handles the /logs enable command
 func handleLogsEnable(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	// Check permissions
+	allowed, err := checkPermissions(s, i)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		respondPermissionError(s, i, "You need Administrator permission and a role higher than the bot.")
+		return nil
+	}
+
 	data := i.ApplicationCommandData()
 	guildID := i.GuildID
 
@@ -31,24 +42,25 @@ func handleLogsEnable(s *discordgo.Session, i *discordgo.InteractionCreate) erro
 
 	// Send test message to the log channel
 	testEmbed := &discordgo.MessageEmbed{
-		Title:       "✅ Anti-Nuke Logging Enabled",
-		Description: "This channel will now receive all anti-nuke event logs",
-		Color:       0x57F287, // Green
+		Title:       "Logging System Active",
+		Description: "This channel has been successfully configured as the primary audit log destination.",
+		Color:       0x2B2D31,
 		Fields: []*discordgo.MessageEmbedField{
 			{
-				Name:   "📊 Log Format",
-				Value:  "Each log will include:\n• Event type and emoji\n• User information\n• Detection speed (microseconds)\n• Action taken",
+				Name:   "Log Format",
+				Value:  "• Event Classification\n• Actor Identification\n• Detection Latency (µs)\n• Automated Response",
 				Inline: false,
 			},
 			{
-				Name:   "⚡ Performance",
-				Value:  "Target detection speed: <1µs",
+				Name:   "Performance Metrics",
+				Value:  "Target Detection Latency: <1µs",
 				Inline: false,
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Ultra-Low-Latency Anti-Nuke System",
+			Text: "Anti-Nuke Security Systems • Enterprise Grade Protection",
 		},
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
 	_, err = s.ChannelMessageSendEmbed(channelID, testEmbed)
@@ -58,21 +70,25 @@ func handleLogsEnable(s *discordgo.Session, i *discordgo.InteractionCreate) erro
 
 	// Send confirmation to user
 	confirmEmbed := &discordgo.MessageEmbed{
-		Title:       "✅ Log Channel Configured",
-		Description: fmt.Sprintf("Anti-nuke logs will be sent to <#%s>", channelID),
-		Color:       0x57F287, // Green
+		Title:       "Log Channel Configured",
+		Description: fmt.Sprintf("Security audit logs will now be streamed to <#%s>.", channelID),
+		Color:       0x2B2D31,
 		Fields: []*discordgo.MessageEmbedField{
 			{
-				Name:   "📌 Channel",
+				Name:   "Destination",
 				Value:  fmt.Sprintf("<#%s>", channelID),
 				Inline: false,
 			},
 			{
-				Name:   "✅ Status",
-				Value:  "Test message sent successfully",
+				Name:   "Status",
+				Value:  "Verification message sent successfully.",
 				Inline: false,
 			},
 		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Anti-Nuke Security Systems • Enterprise Grade Protection",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

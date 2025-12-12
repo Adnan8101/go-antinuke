@@ -8,6 +8,7 @@ import (
 	"go-antinuke-2.0/internal/detectors"
 	"go-antinuke-2.0/internal/ingest"
 	"go-antinuke-2.0/internal/state"
+	"go-antinuke-2.0/internal/sys"
 	"go-antinuke-2.0/pkg/util"
 )
 
@@ -42,6 +43,9 @@ func NewCorrelator(ringBuffer *ingest.RingBuffer, alertQueue *AlertQueue, cpuCor
 }
 
 func (c *Correlator) Start() {
+	if err := sys.PinToCore(c.cpuCore); err != nil {
+		// logging.Warn("Failed to pin correlator to core %d: %v", c.cpuCore, err)
+	}
 	runtime.LockOSThread()
 	c.running = true
 	c.runLoop()
@@ -78,23 +82,23 @@ func (c *Correlator) runLoop() {
 
 		profile := profileStore.Get(event.GuildID)
 		if profile == nil || !profile.Enabled {
-			fmt.Printf("[CORRELATOR] Skipping event - profile disabled for guild %d\n", event.GuildID)
+			// fmt.Printf("[CORRELATOR] Skipping event - profile disabled for guild %d\n", event.GuildID)
 			continue
 		}
 
 		// CRITICAL: Never punish the bot itself or server owner
 		if event.ActorID == state.GetBotID() {
-			fmt.Printf("[CORRELATOR] Skipping event - actor is the bot itself (%d)\n", event.ActorID)
+			// fmt.Printf("[CORRELATOR] Skipping event - actor is the bot itself (%d)\n", event.ActorID)
 			continue
 		}
 
 		if profile.OwnerID != 0 && event.ActorID == profile.OwnerID {
-			fmt.Printf("[CORRELATOR] Skipping event - actor is server owner (%d)\n", event.ActorID)
+			// fmt.Printf("[CORRELATOR] Skipping event - actor is server owner (%d)\n", event.ActorID)
 			continue
 		}
 
 		if actorIndex != 0 && profileStore.IsWhitelisted(event.GuildID, event.ActorID) {
-			fmt.Printf("[CORRELATOR] Skipping event - actor %d is whitelisted\n", event.ActorID)
+			// fmt.Printf("[CORRELATOR] Skipping event - actor %d is whitelisted\n", event.ActorID)
 			continue
 		}
 
