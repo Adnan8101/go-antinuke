@@ -23,7 +23,7 @@ func handleWhitelistAdd(s *discordgo.Session, i *discordgo.InteractionCreate) er
 	}
 
 	options := i.ApplicationCommandData().Options[0].Options // whitelist subcommand group
-	
+
 	// Find the "add" subcommand
 	var addOptions []*discordgo.ApplicationCommandInteractionDataOption
 	for _, opt := range options {
@@ -32,7 +32,7 @@ func handleWhitelistAdd(s *discordgo.Session, i *discordgo.InteractionCreate) er
 			break
 		}
 	}
-	
+
 	if addOptions == nil {
 		return fmt.Errorf("add subcommand not found")
 	}
@@ -119,7 +119,7 @@ func handleWhitelistRemove(s *discordgo.Session, i *discordgo.InteractionCreate)
 	}
 
 	options := i.ApplicationCommandData().Options[0].Options // whitelist subcommand group
-	
+
 	// Find the "remove" subcommand
 	var removeOptions []*discordgo.ApplicationCommandInteractionDataOption
 	for _, opt := range options {
@@ -128,7 +128,7 @@ func handleWhitelistRemove(s *discordgo.Session, i *discordgo.InteractionCreate)
 			break
 		}
 	}
-	
+
 	if removeOptions == nil {
 		return fmt.Errorf("remove subcommand not found")
 	}
