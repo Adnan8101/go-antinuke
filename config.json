@@ -1,0 +1,42 @@
+{
+  "bot": {
+    "token": "",
+    "client_id": ""
+  },
+  "detection": {
+    "enabled": true,
+    "default_mode": "normal",
+    "threshold_file": "",
+    "guild_profiles": ""
+  },
+  "runtime": {
+    "disable_gc": true,
+    "cpu_isolation": true,
+    "correlator_cpu": 1,
+    "ingest_cpu": 2,
+    "decision_cpu": 5,
+    "dispatcher_cpu": 6,
+    "memory_lock": true,
+    "priority_rt": true
+  },
+  "network": {
+    "gateway_queues": 4,
+    "http_pool_size": 8,
+    "worker_count": 8,
+    "api_base_url": "https://discord.com/api/v10"
+  },
+  "forensics": {
+    "enabled": true,
+    "retention_days": 90,
+    "audit_interval_ms": 5000,
+    "snapshot_path": "./snapshots",
+    "log_compression": true
+  },
+  "ha": {
+    "enabled": false,
+    "cluster_nodes": [],
+    "replication_port": 9000,
+    "election_timeout_ms": 3000,
+    "heartbeat_interval_ms": 1000
+  }
+}
