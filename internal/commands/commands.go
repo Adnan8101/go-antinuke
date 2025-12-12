@@ -172,5 +172,13 @@ func GetAllCommands() []*discordgo.ApplicationCommand {
 			Name:        "status",
 			Description: "Show system status",
 		},
+		{
+			Name:        "ping",
+			Description: "Check Discord API latency and connection quality",
+		},
+		{
+			Name:        "stats",
+			Description: "Show comprehensive VM and system statistics",
+		},
 	}
 }

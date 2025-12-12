@@ -96,6 +96,10 @@ func (h *Handler) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		err = handleLogsEnable(s, i)
 	case "status":
 		err = handleStatus(s, i)
+	case "ping":
+		err = handlePing(s, i)
+	case "stats":
+		err = handleStats(s, i)
 	default:
 		err = fmt.Errorf("unknown command: %s", data.Name)
 	}

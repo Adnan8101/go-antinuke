@@ -118,7 +118,38 @@ task_2_benchmark_tests() {
     log_info "CPU latency: ${cpu_latency}ns per operation"
     
     if [[ $cpu_latency -gt $BENCHMARK_THRESHOLD_NS ]]; then
-        log_warning "CPU latency high: ${cpu_latency}ns (threshold: ${BENCHMARK_THRESHOLD_NS}ns)"
+        log_error "CPU latency HIGH: ${cpu_latency}ns (threshold: ${BENCHMARK_THRESHOLD_NS}ns)"
+        echo ""
+        log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        log_warning "  VM PERFORMANCE BELOW THRESHOLD"
+        log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        log_info "Target: 100-500ns | Current: ${cpu_latency}ns"
+        echo ""
+        log_info "Possible causes:"
+        echo "  • CPU governor not set to 'performance'"
+        echo "  • CPU isolation not configured"
+        echo "  • IRQ interference on CPU1"
+        echo "  • Background services causing jitter"
+        echo "  • High CPU steal time (hypervisor contention)"
+        echo ""
+        log_info "🔧 Run diagnostics: ${GREEN}./scripts/diagnose.sh${NC}"
+        log_info "🔧 Auto-fix issues: ${GREEN}sudo ./scripts/fix_jitter.sh --fix-all${NC}"
+        echo ""
+        log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        if [[ "$IS_ROOT" == true ]]; then
+            read -p "Continue anyway? (y/N) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_error "Deployment aborted due to high latency"
+                exit 1
+            fi
+        else
+            log_error "Deployment aborted - latency too high for antinuke engine"
+            exit 1
+        fi
     else
         log_success "CPU latency acceptable: ${cpu_latency}ns"
     fi
@@ -127,7 +158,11 @@ task_2_benchmark_tests() {
     if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
         local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "unknown")
         log_info "CPU governor: $governor"
-        [[ "$governor" == "performance" ]] && log_success "Performance mode active"
+        if [[ "$governor" == "performance" ]]; then
+            log_success "Performance mode active"
+        else
+            log_warning "CPU governor not in performance mode: $governor"
+        fi
     fi
     
     # Memory check
