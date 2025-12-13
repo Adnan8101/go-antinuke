@@ -1,13 +1,12 @@
 package dispatcher
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"go-antinuke-2.0/internal/config"
 	"go-antinuke-2.0/internal/database"
 	"go-antinuke-2.0/internal/logging"
@@ -43,34 +42,39 @@ func (bre *BanRequestExecutor) ExecuteBan(guildID, userID uint64, reason string)
 
 	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(body))
-	if err != nil {
-		return 0, err
-	}
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
 
+	req.SetRequestURI(url)
+	req.Header.SetMethod("PUT")
 	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", bre.token))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Audit-Log-Reason", reason)
 	req.Header.Set("Connection", "keep-alive")
+	req.SetBody(body)
 
 	client := bre.httpPool.GetClient()
 	requestSentTime := time.Since(startTime)
 
-	resp, err := client.Do(req)
+	err := client.DoTimeout(req, resp, 2*time.Second)
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
 
-	bre.rateLimiter.UpdateFromResponse(resp, "ban", guildID)
+	// Update rate limiter from response headers
+	bre.rateLimiter.UpdateFromFastHTTPResponse(resp, "ban", guildID)
 
 	executionTime := time.Since(startTime)
 	executionUs := executionTime.Microseconds()
 	requestUs := requestSentTime.Microseconds()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	statusCode := resp.StatusCode()
+
+	if statusCode >= 200 && statusCode < 300 {
 		go logging.Info("[🔨 BAN EXECUTED] User: %d | Guild: %d | Prep: %d µs | Total: %d µs | Status: %d",
-			userID, guildID, requestUs, executionUs, resp.StatusCode)
+			userID, guildID, requestUs, executionUs, statusCode)
 
 		// Add to banned users database
 		if db := database.GetDB(); db != nil {
@@ -94,8 +98,8 @@ func (bre *BanRequestExecutor) ExecuteBan(guildID, userID uint64, reason string)
 	}
 
 	go logging.Error("[❌ BAN FAILED] User: %d | Guild: %d | Time: %d µs | Status: %d",
-		userID, guildID, executionUs, resp.StatusCode)
-	return 0, fmt.Errorf("ban failed: %d", resp.StatusCode)
+		userID, guildID, executionUs, statusCode)
+	return 0, fmt.Errorf("ban failed: %d", statusCode)
 }
 
 func (bre *BanRequestExecutor) ExecuteKick(guildID, userID uint64, reason string) error {
@@ -105,26 +109,28 @@ func (bre *BanRequestExecutor) ExecuteKick(guildID, userID uint64, reason string
 
 	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%d/members/%d", guildID, userID)
 
-	req, err := http.NewRequest("DELETE", url, nil)
-	if err != nil {
-		return err
-	}
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
 
+	req.SetRequestURI(url)
+	req.Header.SetMethod("DELETE")
 	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", bre.token))
 	req.Header.Set("X-Audit-Log-Reason", reason)
 
 	client := bre.httpPool.GetClient()
-	resp, err := client.Do(req)
+	err := client.DoTimeout(req, resp, 2*time.Second)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	bre.rateLimiter.UpdateFromResponse(resp, "kick", guildID)
+	bre.rateLimiter.UpdateFromFastHTTPResponse(resp, "kick", guildID)
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	statusCode := resp.StatusCode()
+	if statusCode >= 200 && statusCode < 300 {
 		return nil
 	}
 
-	return fmt.Errorf("kick failed: %d", resp.StatusCode)
+	return fmt.Errorf("kick failed: %d", statusCode)
 }

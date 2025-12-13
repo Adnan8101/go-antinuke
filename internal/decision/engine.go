@@ -97,6 +97,28 @@ func (de *DecisionEngine) executeDecision(incident *IncidentPacket) {
 	shouldLockdown := config.ShouldAutoLockdown(safetyMode) && incident.Severity >= uint8(SeverityCritical)
 	shouldQuarantine := config.ShouldQuarantine(safetyMode) && incident.Severity >= uint8(SeverityMedium)
 
+	// PANIC MODE: ONLY BAN - fastest action possible
+	// No kick, no lockdown, no quarantine, no integration deletion
+	// Discord will automatically clean up integrations when user is banned
+	if incident.PanicMode == 1 {
+		// In panic mode, force immediate ban - this is the fastest and most effective action
+		// Skip all other actions to minimize latency
+		fmt.Printf("[DECISION] PANIC MODE - Issuing INSTANT BAN for actor %d\n", incident.ActorID)
+
+		as := state.GetActorState()
+		actorMap := state.GetActorIDMap()
+		actorIndex := actorMap.GetIndex(incident.ActorID)
+		if actorIndex == 0 {
+			actorIndex = actorMap.Register(incident.ActorID)
+		}
+		as.SetBanned(actorIndex, true)
+
+		reason := fmt.Sprintf("Panic Mode - %s - Instant Ban Enforced", de.getEventName(incident.EventType))
+		job := NewBanJob(incident.GuildID, incident.ActorID, reason, incident.EventType, incident.PanicMode, incident.Timestamp)
+		de.jobQueue.Enqueue(job)
+		return // Exit immediately, don't process any other actions
+	}
+
 	// In panic mode, immediately kick the user to stop ongoing actions
 	// Kick is faster than ban and removes them from server instantly
 	if incident.PanicMode == 1 && shouldBan {
@@ -215,6 +237,27 @@ func (de *DecisionEngine) getBanReason(incident *IncidentPacket) string {
 	}
 
 	return fmt.Sprintf("%s - Automated Protection", eventName)
+}
+
+func (de *DecisionEngine) getEventName(eventType uint8) string {
+	switch eventType {
+	case 1:
+		return "Mass Ban Detection"
+	case 10:
+		return "Channel Create Spam"
+	case 11:
+		return "Channel Delete Attack"
+	case 18:
+		return "Role Create Spam"
+	case 19:
+		return "Role Delete Attack"
+	case 31:
+		return "Webhook Spam"
+	case 32:
+		return "Permission Escalation"
+	default:
+		return "Security Violation"
+	}
 }
 
 func (de *DecisionEngine) Stop() {

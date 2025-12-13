@@ -89,6 +89,119 @@ func fetchActorFromAuditLog(sess *discordgo.Session, guildID string, actionType 
 	// Get the most recent entry
 	entry := audit.AuditLogEntries[0]
 
+	// FAKE EVENT DETECTION: Detect fake audit log events
+	isFakeEvent := false
+	eventTypeName := ""
+
+	// Check for fake member-targeted events (kick, ban, unban)
+	if actionType == 20 || actionType == 22 || actionType == 23 { // KICK=20, BAN=22, UNBAN=23
+		if entry.TargetID != "" {
+			// Check if the target user actually exists in the server
+			_, err := sess.GuildMember(guildID, entry.TargetID)
+			if err != nil {
+				isFakeEvent = true
+				eventTypeName = map[int]string{20: "kick", 22: "ban", 23: "unban"}[actionType]
+			}
+		}
+	}
+
+	// Check for fake role events (role create, delete, update)
+	if actionType == 30 || actionType == 32 || actionType == 31 { // ROLE_CREATE=30, ROLE_DELETE=32, ROLE_UPDATE=31
+		if entry.TargetID != "" {
+			// Check if the role actually exists in the server
+			roles, err := sess.GuildRoles(guildID)
+			if err == nil {
+				roleExists := false
+				for _, role := range roles {
+					if role.ID == entry.TargetID {
+						roleExists = true
+						break
+					}
+				}
+				if !roleExists {
+					isFakeEvent = true
+					eventTypeName = map[int]string{30: "role create", 32: "role delete", 31: "role update"}[actionType]
+				}
+			}
+		}
+	}
+
+	// Check for fake channel events (channel create, delete, update)
+	if actionType == 10 || actionType == 12 || actionType == 11 { // CHANNEL_CREATE=10, CHANNEL_DELETE=12, CHANNEL_UPDATE=11
+		if entry.TargetID != "" {
+			// Check if the channel actually exists
+			_, err := sess.Channel(entry.TargetID)
+			if err != nil {
+				isFakeEvent = true
+				eventTypeName = map[int]string{10: "channel create", 12: "channel delete", 11: "channel update"}[actionType]
+			}
+		}
+	}
+
+	// Check for fake webhook events
+	if actionType == 50 || actionType == 51 || actionType == 52 { // WEBHOOK_CREATE=50, WEBHOOK_UPDATE=51, WEBHOOK_DELETE=52
+		if entry.TargetID != "" {
+			// Webhooks are harder to verify, but we can try to fetch it
+			// For now, we'll log but not auto-ban (webhooks get deleted legitimately)
+			// Only flag as fake if it's a webhook create/update for non-existent webhook
+			if actionType == 50 || actionType == 51 {
+				// Try to get webhook (will fail if doesn't exist)
+				_, err := sess.Webhook(entry.TargetID)
+				if err != nil {
+					isFakeEvent = true
+					eventTypeName = map[int]string{50: "webhook create", 51: "webhook update", 52: "webhook delete"}[actionType]
+				}
+			}
+		}
+	}
+
+	// If fake event detected, ban the perpetrator
+	if isFakeEvent {
+		logging.Warn("[FAKE EVENT DETECTED] %s (action %d) on non-existent target %s by %s in guild %s",
+			eventTypeName, actionType, entry.TargetID, entry.UserID, guildID)
+
+		// Ban the perpetrator immediately
+		go func() {
+			err := sess.GuildBanCreateWithReason(guildID, entry.UserID,
+				fmt.Sprintf("Fake %s event detected - security violation", eventTypeName), 0)
+			if err != nil {
+				logging.Error("Failed to ban fake event perpetrator %s: %v", entry.UserID, err)
+			} else {
+				logging.Info("[✓ FAKE EVENT BAN] Banned %s for creating fake %s event", entry.UserID, eventTypeName)
+
+				// Add to database
+				if db := database.GetDB(); db != nil {
+					db.AddBannedUser(guildID, entry.UserID,
+						fmt.Sprintf("Fake %s event creator", eventTypeName),
+						"antinuke-bot", false, "")
+				}
+
+				// Send log to guild's log channel
+				guildIDNum, _ := strconv.ParseUint(guildID, 10, 64)
+				_ = guildIDNum // Use database for log channel
+				if db := database.GetDB(); db != nil {
+					guildConfig, err := db.GetGuildConfig(guildID)
+					if err == nil && guildConfig != nil && guildConfig.LogChannelID != "" {
+						sess.ChannelMessageSendEmbed(guildConfig.LogChannelID, &discordgo.MessageEmbed{
+							Title: "🚨 FAKE EVENT DETECTED & BANNED",
+							Description: fmt.Sprintf("User <@%s> created a fake **%s** event targeting non-existent target `%s`\n\n**Action Taken:** Permanently banned\n\n**Reason:** Creating fake audit log events is a serious security violation.",
+								entry.UserID,
+								eventTypeName,
+								entry.TargetID),
+							Color:     0xFF0000,
+							Timestamp: time.Now().Format(time.RFC3339),
+							Footer: &discordgo.MessageEmbedFooter{
+								Text: "Antinuke Security System",
+							},
+						})
+					}
+				}
+			}
+		}()
+
+		return 0 // Don't process this fake event further
+	}
+
 	// Check if the actor is a bot - skip bot actions entirely
 	if len(audit.Users) > 0 {
 		for _, user := range audit.Users {
@@ -159,7 +272,7 @@ func (s *Session) SetupEventHandlers(ringBuffer *ingest.RingBuffer) {
 		logging.Info("[STATE] Cleared actor state for unbanned user %s in guild %s", b.User.ID, b.GuildID)
 	})
 
-	// Handle Guild Member Add (Join) - Smart bot/user rejoin logic
+	// Handle Guild Member Add (Join) - Panic mode rejoin logic
 	s.discord.AddHandler(func(sess *discordgo.Session, m *discordgo.GuildMemberAdd) {
 		if m.GuildID == "" {
 			return
@@ -168,134 +281,117 @@ func (s *Session) SetupEventHandlers(ringBuffer *ingest.RingBuffer) {
 		userID, _ := strconv.ParseUint(m.User.ID, 10, 64)
 		guildID, _ := strconv.ParseUint(m.GuildID, 10, 64)
 
-		// Check if this user was previously banned by the bot
-		if db := database.GetDB(); db != nil {
-			if db.IsBannedUser(m.GuildID, m.User.ID) {
-				// Get the banned user record (for future use if needed)
-				_, err := db.GetBannedUser(m.GuildID, m.User.ID)
-				if err != nil {
-					logging.Error("Failed to fetch banned user record: %v", err)
-					return
+		// Check if this is a bot joining
+		if m.User.Bot {
+			logging.Info("[BOT JOINED] Bot %s (%s) joined guild %s", m.User.Username, m.User.ID, m.GuildID)
+
+			// Find who added this bot by checking audit logs
+			audit, err := sess.GuildAuditLog(m.GuildID, "", "", 28, 5) // 28 = BOT_ADD
+			if err != nil {
+				logging.Error("Failed to fetch audit log for bot add: %v", err)
+				// Safety measure: check if bot was previously banned
+				if db := database.GetDB(); db != nil && db.IsBannedUser(m.GuildID, m.User.ID) {
+					go sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Previously banned bot - automatic re-ban", 0)
 				}
+				return
+			}
 
-				// Check if this is a bot
-				if m.User.Bot {
-					logging.Info("[BANNED BOT REJOINED] Bot %s (%s) rejoined guild %s", m.User.Username, m.User.ID, m.GuildID)
-
-					// Find who added this bot by checking audit logs
-					audit, err := sess.GuildAuditLog(m.GuildID, "", "", 28, 5) // 28 = BOT_ADD
-					if err != nil {
-						logging.Error("Failed to fetch audit log for bot add: %v", err)
-						// Re-ban the bot immediately as a safety measure
-						go sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Previously banned bot - automatic re-ban", 0)
-						return
-					}
-
-					// Find the most recent bot add entry for this bot
-					var adderID string
-					for _, entry := range audit.AuditLogEntries {
-						if entry.TargetID == m.User.ID {
-							adderID = entry.UserID
-							break
-						}
-					}
-
-					if adderID == "" {
-						logging.Warn("Could not determine who added bot %s", m.User.ID)
-						// Re-ban as safety measure
-						go sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Previously banned bot - automatic re-ban", 0)
-						return
-					}
-
-					adderIDNum, _ := strconv.ParseUint(adderID, 10, 64)
-
-					// Get guild profile to check owner and whitelist
-					profile := config.GetProfileStore().Get(guildID)
-					isOwner := profile != nil && profile.OwnerID == adderIDNum
-					isWhitelisted := profile != nil && config.GetProfileStore().IsWhitelisted(guildID, adderIDNum)
-
-					if isOwner || isWhitelisted {
-						// Owner or whitelisted user added the bot - ALLOW IT
-						logging.Info("[✓ BOT ALLOWED] Bot %s added by %s %s - Clearing ban record",
-							m.User.Username,
-							map[bool]string{true: "owner", false: "whitelisted user"}[isOwner],
-							adderID)
-
-						// Remove from banned list and clear state for fresh start
-						db.RemoveBannedUser(m.GuildID, m.User.ID)
-						state.ClearActorState(userID)
-
-						// Log this action
-						logging.Info("[STATE] Bot %s allowed and given fresh start by %s", m.User.ID, adderID)
-						return
-					} else {
-						// Unauthorized person added a previously banned bot - BAN BOTH
-						logging.Warn("[❌ UNAUTHORIZED BOT ADD] Bot %s added by unauthorized user %s - Banning both", m.User.Username, adderID)
-
-						// Ban the bot
-						go func() {
-							err := sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Previously banned bot re-added by unauthorized user", 0)
-							if err != nil {
-								logging.Error("Failed to re-ban bot %s: %v", m.User.ID, err)
-							} else {
-								logging.Info("[✓ BOT RE-BANNED] %s", m.User.ID)
-							}
-						}()
-
-						// Ban the person who added it
-						go func() {
-							err := sess.GuildBanCreateWithReason(m.GuildID, adderID, "Added previously banned bot - security violation", 0)
-							if err != nil {
-								logging.Error("Failed to ban user %s who added banned bot: %v", adderID, err)
-							} else {
-								logging.Info("[✓ ADDER BANNED] User %s banned for adding banned bot", adderID)
-								// Add to database
-								if db := database.GetDB(); db != nil {
-									db.AddBannedUser(m.GuildID, adderID, "Added previously banned bot", "antinuke-bot", false, "")
-								}
-							}
-						}()
-
-						// Try to send DM to the banned person
-						go func() {
-							channel, err := sess.UserChannelCreate(adderID)
-							if err == nil {
-								sess.ChannelMessageSend(channel.ID, fmt.Sprintf(
-									"⚠️ **Security Violation in %s**\\n\\n"+
-										"You were banned for adding a previously banned bot (%s).\\n"+
-										"This bot was flagged by the antinuke system for malicious behavior.\\n\\n"+
-										"Only the server owner or whitelisted users can re-add banned bots.",
-									m.GuildID, m.User.Username))
-							}
-						}()
-
-						return
-					}
-				} else {
-					// Human user rejoined - give them a fresh start
-					logging.Info("[BANNED USER REJOINED] User %s rejoined guild %s - Clearing ban record for fresh start", m.User.ID, m.GuildID)
-
-					// Remove from banned list to give them another chance
-					db.RemoveBannedUser(m.GuildID, m.User.ID)
-					state.ClearActorState(userID)
-
-					logging.Info("[✓ FRESH START] User %s given clean slate in guild %s - will be monitored for new violations", m.User.ID, m.GuildID)
-					return
+			// Find the most recent bot add entry for this bot
+			var adderID string
+			for _, entry := range audit.AuditLogEntries {
+				if entry.TargetID == m.User.ID {
+					adderID = entry.UserID
+					break
 				}
 			}
 
-			// User not in banned list - cleanup and fresh start
-			db.RemoveBannedUser(m.GuildID, m.User.ID)
+			if adderID == "" {
+				logging.Warn("Could not determine who added bot %s", m.User.ID)
+				// Safety measure: check if bot was previously banned
+				if db := database.GetDB(); db != nil && db.IsBannedUser(m.GuildID, m.User.ID) {
+					go sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Previously banned bot - automatic re-ban", 0)
+				}
+				return
+			}
+
+			adderIDNum, _ := strconv.ParseUint(adderID, 10, 64)
+
+			// Get guild profile to check owner and whitelist
+			profile := config.GetProfileStore().Get(guildID)
+			isOwner := profile != nil && profile.OwnerID == adderIDNum
+			isWhitelisted := profile != nil && config.GetProfileStore().IsWhitelisted(guildID, adderIDNum)
+
+			if isOwner || isWhitelisted {
+				// Owner or whitelisted user added the bot - ALLOW IT
+				logging.Info("[✓ BOT ALLOWED] Bot %s added by %s %s - Allowing and clearing state",
+					m.User.Username,
+					map[bool]string{true: "owner", false: "whitelisted user"}[isOwner],
+					adderID)
+
+				// Remove from banned list if present and clear state for fresh start
+				if db := database.GetDB(); db != nil {
+					db.RemoveBannedUser(m.GuildID, m.User.ID)
+				}
+				state.ClearActorState(userID)
+
+				// Log this action
+				logging.Info("[STATE] Bot %s allowed and given fresh start by %s", m.User.ID, adderID)
+				return
+			} else {
+				// Unauthorized person added a bot - BAN THE BOT
+				logging.Warn("[❌ UNAUTHORIZED BOT ADD] Bot %s added by unauthorized user %s - Banning bot", m.User.Username, adderID)
+
+				// Ban the bot
+				go func() {
+					err := sess.GuildBanCreateWithReason(m.GuildID, m.User.ID, "Bot added by non-whitelisted user - security policy", 0)
+					if err != nil {
+						logging.Error("Failed to ban unauthorized bot %s: %v", m.User.ID, err)
+					} else {
+						logging.Info("[✓ BOT BANNED] %s", m.User.ID)
+						// Add to database
+						if db := database.GetDB(); db != nil {
+							db.AddBannedUser(m.GuildID, m.User.ID, "Added by non-whitelisted user", "antinuke-bot", true, adderID)
+						}
+					}
+				}()
+
+				// Send log to guild's log channel
+				go func() {
+					// Get log channel from database
+					if db := database.GetDB(); db != nil {
+						guildConfig, err := db.GetGuildConfig(m.GuildID)
+						if err == nil && guildConfig != nil && guildConfig.LogChannelID != "" {
+							sess.ChannelMessageSendEmbed(guildConfig.LogChannelID, &discordgo.MessageEmbed{
+								Title: "🚨 UNAUTHORIZED BOT DETECTED & BANNED",
+								Description: fmt.Sprintf("Bot <@%s> was added by <@%s> who is not authorized.\\n\\n**Action Taken:** Bot banned\\n\\n**Note:** Only the server owner or whitelisted users can add bots.",
+									m.User.ID,
+									adderID),
+								Color:     0xFF0000,
+								Timestamp: time.Now().Format(time.RFC3339),
+							})
+						}
+					}
+				}()
+
+				return
+			}
 		}
 
-		// Clear actor state for fresh start
-		state.ClearActorState(userID)
-		logging.Info("[STATE] Cleared actor state for joining %s %s in guild %s",
-			map[bool]string{true: "bot", false: "user"}[m.User.Bot],
-			m.User.ID, m.GuildID)
-	})
+		// Human user joined - ALWAYS give fresh start, never re-ban
+		logging.Info("[USER JOINED] User %s joined guild %s - Giving fresh start", m.User.ID, m.GuildID)
 
-	// CRITICAL: GuildAuditLogEntryCreate - This captures WHO did the action
+		// Remove from banned list if they were previously banned (panic mode rejoin)
+		if db := database.GetDB(); db != nil {
+			if db.IsBannedUser(m.GuildID, m.User.ID) {
+				logging.Info("[PANIC MODE REJOIN] User %s was previously banned, removing record and resetting tracking", m.User.ID)
+				db.RemoveBannedUser(m.GuildID, m.User.ID)
+			}
+		}
+
+		// Clear actor state for fresh start - they can be banned again if they violate
+		state.ClearActorState(userID)
+		logging.Info("[✓ FRESH START] User %s given clean slate in guild %s - tracking reset", m.User.ID, m.GuildID)
+	}) // CRITICAL: GuildAuditLogEntryCreate - This captures WHO did the action
 	s.discord.AddHandler(func(sess *discordgo.Session, audit *discordgo.GuildAuditLogEntryCreate) {
 		startTime := time.Now() // Track detection latency
 

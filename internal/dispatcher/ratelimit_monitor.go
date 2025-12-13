@@ -1,10 +1,11 @@
 package dispatcher
 
 import (
-	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 type RateLimitBucket struct {
@@ -42,12 +43,12 @@ func (rlm *RateLimitMonitor) CanExecute(route string, guildID uint64) bool {
 	return bucket.Remaining > 0
 }
 
-func (rlm *RateLimitMonitor) UpdateFromResponse(resp *http.Response, route string, guildID uint64) {
+func (rlm *RateLimitMonitor) UpdateFromFastHTTPResponse(resp *fasthttp.Response, route string, guildID uint64) {
 	key := rlm.getKey(route, guildID)
 
-	remaining := resp.Header.Get("X-RateLimit-Remaining")
-	limit := resp.Header.Get("X-RateLimit-Limit")
-	reset := resp.Header.Get("X-RateLimit-Reset")
+	remaining := string(resp.Header.Peek("X-RateLimit-Remaining"))
+	limit := string(resp.Header.Peek("X-RateLimit-Limit"))
+	reset := string(resp.Header.Peek("X-RateLimit-Reset"))
 
 	bucket := &RateLimitBucket{}
 

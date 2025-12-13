@@ -1,48 +1,44 @@
 package dispatcher
 
 import (
-	"crypto/tls"
-	"net"
-	"net/http"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 type HTTPPool struct {
-	clients []*http.Client
+	clients []*fasthttp.Client
 	size    int
 	index   int
 }
 
 func NewHTTPPool(size int) *HTTPPool {
-	clients := make([]*http.Client, size)
-
-	dialer := &net.Dialer{
-		Timeout:   2 * time.Second,
-		KeepAlive: 60 * time.Second,
-	}
-
-	transport := &http.Transport{
-		DialContext:           dialer.DialContext,
-		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   50,
-		MaxConnsPerHost:       50,
-		IdleConnTimeout:       120 * time.Second,
-		TLSHandshakeTimeout:   2 * time.Second,
-		ResponseHeaderTimeout: 3 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig: &tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: false,
-		},
-		DisableCompression: true,
-		DisableKeepAlives:  false,
-		ForceAttemptHTTP2:  true,
-	}
+	clients := make([]*fasthttp.Client, size)
 
 	for i := 0; i < size; i++ {
-		clients[i] = &http.Client{
-			Transport: transport,
-			Timeout:   3 * time.Second,
+		clients[i] = &fasthttp.Client{
+			// Ultra-low latency settings
+			MaxConnsPerHost:     200,
+			MaxIdleConnDuration: 60 * time.Second,
+			MaxConnDuration:     10 * time.Minute,
+			ReadTimeout:         2 * time.Second,
+			WriteTimeout:        2 * time.Second,
+			MaxConnWaitTimeout:  1 * time.Second,
+
+			// Performance optimizations
+			ReadBufferSize:      8192,
+			WriteBufferSize:     8192,
+			MaxResponseBodySize: 1024 * 1024, // 1MB
+
+			// Disable compression for speed
+			DisableHeaderNamesNormalizing: false,
+			DisablePathNormalizing:        false,
+
+			// Keep connections alive
+			MaxIdemponentCallAttempts: 1,
+
+			// TLS config
+			TLSConfig: nil, // Use default
 		}
 	}
 
@@ -53,7 +49,7 @@ func NewHTTPPool(size int) *HTTPPool {
 	}
 }
 
-func (hp *HTTPPool) GetClient() *http.Client {
+func (hp *HTTPPool) GetClient() *fasthttp.Client {
 	client := hp.clients[hp.index]
 	hp.index = (hp.index + 1) % hp.size
 	return client
@@ -62,21 +58,26 @@ func (hp *HTTPPool) GetClient() *http.Client {
 func (hp *HTTPPool) Warmup() {
 	warmupURL := "https://discord.com/api/v10/gateway"
 
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
 	successCount := 0
-	for i := 0; i < 5; i++ {
-		req, _ := http.NewRequest("GET", warmupURL, nil)
-		resp, err := hp.clients[0].Do(req)
-		if err == nil && resp != nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				successCount++
-			}
+	for i := 0; i < 3; i++ {
+		req.SetRequestURI(warmupURL)
+		req.Header.SetMethod("GET")
+
+		err := hp.clients[0].DoTimeout(req, resp, 2*time.Second)
+		if err == nil && resp.StatusCode() == 200 {
+			successCount++
 		}
-		if successCount >= 3 {
+
+		if successCount >= 2 {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 }
