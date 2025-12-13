@@ -46,14 +46,33 @@ func (rw *RESTWorker) Start() {
 }
 
 func (rw *RESTWorker) runLoop() {
+	// Batch processing for better throughput
+	const batchSize = 8
+	jobBatch := make([]*decision.Job, 0, batchSize)
+
 	for rw.running {
-		job, ok := rw.jobQueue.Dequeue()
-		if !ok {
+		// Try to fill batch
+		for len(jobBatch) < batchSize {
+			job, ok := rw.jobQueue.Dequeue()
+			if !ok {
+				break
+			}
+			jobBatch = append(jobBatch, job)
+		}
+
+		// If no jobs, yield and continue
+		if len(jobBatch) == 0 {
 			runtime.Gosched()
 			continue
 		}
 
-		rw.executeJob(job)
+		// Process batch
+		for _, job := range jobBatch {
+			rw.executeJob(job)
+		}
+
+		// Clear batch for reuse
+		jobBatch = jobBatch[:0]
 	}
 }
 

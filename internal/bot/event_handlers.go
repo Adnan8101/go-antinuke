@@ -32,7 +32,7 @@ var (
 	auditCache = &auditLogCache{
 		entries: make(map[string]*auditCacheEntry),
 	}
-	cacheTTL = 5 * time.Second
+	cacheTTL = 10 * time.Second
 )
 
 func (c *auditLogCache) Store(guildID string, action int, actorID, targetID uint64) {
@@ -47,10 +47,13 @@ func (c *auditLogCache) Store(guildID string, action int, actorID, targetID uint
 		timestamp: time.Now(),
 	}
 
-	// Cleanup old entries
-	for k, v := range c.entries {
-		if time.Since(v.timestamp) > cacheTTL {
-			delete(c.entries, k)
+	// Only cleanup every 100th entry to reduce overhead
+	if len(c.entries)%100 == 0 {
+		now := time.Now()
+		for k, v := range c.entries {
+			if now.Sub(v.timestamp) > cacheTTL {
+				delete(c.entries, k)
+			}
 		}
 	}
 }

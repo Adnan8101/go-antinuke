@@ -216,8 +216,24 @@ func extractU64Field(data []byte, keys ...string) uint64 {
 	if s == "" {
 		return 0
 	}
-	if s[0] == '"' && s[len(s)-1] == '"' {
+	// Fast path: remove quotes if present
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		s = s[1 : len(s)-1]
+	}
+	// Optimized parsing: use manual parsing for common snowflake IDs
+	if len(s) > 0 && len(s) <= 20 { // Discord snowflake max length
+		val := uint64(0)
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if c >= '0' && c <= '9' {
+				val = val*10 + uint64(c-'0')
+			} else {
+				// Fallback to standard parsing for non-numeric
+				val, _ = strconv.ParseUint(s, 10, 64)
+				return val
+			}
+		}
+		return val
 	}
 	val, _ := strconv.ParseUint(s, 10, 64)
 	return val

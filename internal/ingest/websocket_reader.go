@@ -42,7 +42,13 @@ func NewGatewayReader(token string, intents int, eventQueue *RingBuffer, cpuCore
 func (g *GatewayReader) Connect() error {
 	runtime.LockOSThread()
 
-	dialer := websocket.DefaultDialer
+	// Optimize websocket connection with larger buffers
+	dialer := &websocket.Dialer{
+		ReadBufferSize:  65536, // 64KB read buffer
+		WriteBufferSize: 32768, // 32KB write buffer
+		Proxy:           nil,
+		HandshakeTimeout: 10 * time.Second,
+	}
 	conn, _, err := dialer.Dial("wss://gateway.discord.gg/?v=10&encoding=json", nil)
 	if err != nil {
 		return err

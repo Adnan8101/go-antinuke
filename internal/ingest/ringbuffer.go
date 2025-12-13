@@ -17,6 +17,11 @@ func NewRingBuffer(size uint32) *RingBuffer {
 		size = nextPowerOf2(size)
 	}
 
+	// Ensure minimum buffer size for high throughput
+	if size < 8192 {
+		size = 8192
+	}
+
 	return &RingBuffer{
 		buffer: make([]Event, size),
 		mask:   size - 1,

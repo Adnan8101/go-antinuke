@@ -10,6 +10,10 @@ import (
 
 type Database struct {
 	db *sql.DB
+	// Prepared statements for frequently used queries
+	stmtGetGuildConfig *sql.Stmt
+	stmtLogEvent       *sql.Stmt
+	stmtGetWhitelist   *sql.Stmt
 }
 
 var globalDB *Database
@@ -21,10 +25,10 @@ func Initialize(dbPath string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(time.Hour)
-	db.SetConnMaxIdleTime(10 * time.Minute)
+	db.SetMaxOpenConns(50)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
@@ -40,6 +44,22 @@ func Initialize(dbPath string) error {
 		return fmt.Errorf("failed to set synchronous mode: %w", err)
 	}
 
+	// Additional performance optimizations
+	_, err = db.Exec("PRAGMA cache_size=-64000") // 64MB cache
+	if err != nil {
+		return fmt.Errorf("failed to set cache size: %w", err)
+	}
+
+	_, err = db.Exec("PRAGMA temp_store=MEMORY")
+	if err != nil {
+		return fmt.Errorf("failed to set temp store: %w", err)
+	}
+
+	_, err = db.Exec("PRAGMA mmap_size=268435456") // 256MB memory-mapped I/O
+	if err != nil {
+		return fmt.Errorf("failed to set mmap size: %w", err)
+	}
+
 	globalDB = &Database{db: db}
 
 	if err := globalDB.createTables(); err != nil {
@@ -48,6 +68,11 @@ func Initialize(dbPath string) error {
 
 	if err := globalDB.seedEventTypes(); err != nil {
 		return fmt.Errorf("failed to seed event types: %w", err)
+	}
+
+	// Prepare frequently used statements
+	if err := globalDB.prepareStatements(); err != nil {
+		return fmt.Errorf("failed to prepare statements: %w", err)
 	}
 
 	return nil
@@ -73,8 +98,20 @@ func IsConnected() bool {
 
 // Close closes the database connection
 func Close() error {
-	if globalDB != nil && globalDB.db != nil {
-		return globalDB.db.Close()
+	if globalDB != nil {
+		// Close prepared statements
+		if globalDB.stmtGetGuildConfig != nil {
+			globalDB.stmtGetGuildConfig.Close()
+		}
+		if globalDB.stmtLogEvent != nil {
+			globalDB.stmtLogEvent.Close()
+		}
+		if globalDB.stmtGetWhitelist != nil {
+			globalDB.stmtGetWhitelist.Close()
+		}
+		if globalDB.db != nil {
+			return globalDB.db.Close()
+		}
 	}
 	return nil
 }
@@ -211,14 +248,58 @@ func (d *Database) seedEventTypes() error {
 	return nil
 }
 
-// GetGuildConfig retrieves guild configuration
-func (d *Database) GetGuildConfig(guildID string) (*GuildConfig, error) {
-	var config GuildConfig
-	err := d.db.QueryRow(
+// prepareStatements prepares frequently used SQL statements
+func (d *Database) prepareStatements() error {
+	var err error
+
+	// Prepare guild config query
+	d.stmtGetGuildConfig, err = d.db.Prepare(
 		`SELECT guild_id, panic_mode, log_channel_id, enabled_events, created_at, updated_at 
 		 FROM guild_config WHERE guild_id = ?`,
-		guildID,
-	).Scan(&config.GuildID, &config.PanicMode, &config.LogChannelID, &config.EnabledEvents, &config.CreatedAt, &config.UpdatedAt)
+	)
+	if err != nil {
+		return fmt.Errorf("failed to prepare guild config statement: %w", err)
+	}
+
+	// Prepare event log insert
+	d.stmtLogEvent, err = d.db.Prepare(
+		`INSERT INTO event_logs (guild_id, event_type, actor_id, target_id, detection_speed_us, action_taken, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to prepare log event statement: %w", err)
+	}
+
+	// Prepare whitelist query
+	d.stmtGetWhitelist, err = d.db.Prepare(
+		`SELECT id, guild_id, target_id, target_type, event_type, created_at 
+		 FROM whitelist WHERE guild_id = ?`,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to prepare whitelist statement: %w", err)
+	}
+
+	return nil
+}
+
+// GetGuildConfig retrieves guild configuration (using prepared statement)
+func (d *Database) GetGuildConfig(guildID string) (*GuildConfig, error) {
+	var config GuildConfig
+	
+	var err error
+	if d.stmtGetGuildConfig != nil {
+		err = d.stmtGetGuildConfig.QueryRow(guildID).Scan(
+			&config.GuildID, &config.PanicMode, &config.LogChannelID, 
+			&config.EnabledEvents, &config.CreatedAt, &config.UpdatedAt,
+		)
+	} else {
+		// Fallback if prepared statement not available
+		err = d.db.QueryRow(
+			`SELECT guild_id, panic_mode, log_channel_id, enabled_events, created_at, updated_at 
+			 FROM guild_config WHERE guild_id = ?`,
+			guildID,
+		).Scan(&config.GuildID, &config.PanicMode, &config.LogChannelID, &config.EnabledEvents, &config.CreatedAt, &config.UpdatedAt)
+	}
 
 	if err == sql.ErrNoRows {
 		// Return default config if not found
@@ -255,15 +336,24 @@ func (d *Database) UpsertGuildConfig(config *GuildConfig) error {
 	return err
 }
 
-// LogEvent logs an event to the database
+// LogEvent logs an event to the database (using prepared statement)
 func (d *Database) LogEvent(log *EventLog) error {
 	log.Timestamp = time.Now().Unix()
 
-	_, err := d.db.Exec(
-		`INSERT INTO event_logs (guild_id, event_type, actor_id, target_id, detection_speed_us, action_taken, timestamp)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		log.GuildID, log.EventType, log.ActorID, log.TargetID, log.DetectionSpeedUS, log.ActionTaken, log.Timestamp,
-	)
+	var err error
+	if d.stmtLogEvent != nil {
+		_, err = d.stmtLogEvent.Exec(
+			log.GuildID, log.EventType, log.ActorID, log.TargetID, 
+			log.DetectionSpeedUS, log.ActionTaken, log.Timestamp,
+		)
+	} else {
+		// Fallback if prepared statement not available
+		_, err = d.db.Exec(
+			`INSERT INTO event_logs (guild_id, event_type, actor_id, target_id, detection_speed_us, action_taken, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			log.GuildID, log.EventType, log.ActorID, log.TargetID, log.DetectionSpeedUS, log.ActionTaken, log.Timestamp,
+		)
+	}
 
 	return err
 }

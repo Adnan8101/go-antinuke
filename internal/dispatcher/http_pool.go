@@ -35,31 +35,31 @@ func NewHTTPPool(size int) *HTTPPool {
 	for i := 0; i < size; i++ {
 		clients[i] = &fasthttp.Client{
 			// EXTREME performance settings
-			MaxConnsPerHost:     1000,    // Maximum connections
-			MaxIdleConnDuration: 120 * time.Second,
-			MaxConnDuration:     0,       // Never close connections
-			ReadTimeout:         800 * time.Millisecond,  // Ultra-fast timeout
-			WriteTimeout:        800 * time.Millisecond,
-			MaxConnWaitTimeout:  200 * time.Millisecond,  // Minimum wait
+			MaxConnsPerHost:     2000, // Maximum connections
+			MaxIdleConnDuration: 180 * time.Second,
+			MaxConnDuration:     0,                      // Never close connections
+			ReadTimeout:         600 * time.Millisecond, // Ultra-fast timeout
+			WriteTimeout:        600 * time.Millisecond,
+			MaxConnWaitTimeout:  150 * time.Millisecond, // Minimum wait
 
 			// Maximum buffer sizes for throughput
-			ReadBufferSize:      32768,   // 32KB
-			WriteBufferSize:     32768,   // 32KB
+			ReadBufferSize:      65536,           // 64KB
+			WriteBufferSize:     65536,           // 64KB
 			MaxResponseBodySize: 4 * 1024 * 1024, // 4MB
 
 			// Skip ALL normalization for raw speed
 			DisableHeaderNamesNormalizing: true,
 			DisablePathNormalizing:        true,
-			
+
 			// No retries - fail fast
 			MaxIdemponentCallAttempts: 1,
-			
+
 			// Connection optimizations
-			DialDualStack: true,  // IPv4 + IPv6 simultaneously
-			
+			DialDualStack: true, // IPv4 + IPv6 simultaneously
+
 			// TLS optimization
 			TLSConfig: tlsConfig,
-			
+
 			// Disable compression for speed
 			NoDefaultUserAgentHeader: true,
 		}

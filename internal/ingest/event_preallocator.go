@@ -1,6 +1,9 @@
 package ingest
 
-import "go-antinuke-2.0/pkg/util"
+import (
+	"sync"
+	"go-antinuke-2.0/pkg/util"
+)
 
 const (
 	EventTypeUnknown = iota
@@ -43,6 +46,32 @@ type Event struct {
 	Metadata  uint64
 	Timestamp int64
 	_         [16]byte
+}
+
+// Event pool using sync.Pool for better GC performance
+var eventPool = sync.Pool{
+	New: func() interface{} {
+		return &Event{}
+	},
+}
+
+// AcquireEvent gets an event from the pool
+func AcquireEvent() *Event {
+	return eventPool.Get().(*Event)
+}
+
+// ReleaseEvent returns an event to the pool
+func ReleaseEvent(e *Event) {
+	// Reset event fields
+	e.EventType = 0
+	e.Priority = 0
+	e.Flags = 0
+	e.GuildID = 0
+	e.ActorID = 0
+	e.TargetID = 0
+	e.Metadata = 0
+	e.Timestamp = 0
+	eventPool.Put(e)
 }
 
 // CreateEvent creates a new event with the given parameters

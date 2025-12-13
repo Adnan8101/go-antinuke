@@ -47,21 +47,40 @@ func (de *DecisionEngine) Start() {
 }
 
 func (de *DecisionEngine) runLoop() {
+	// Batch processing for better throughput
+	const batchSize = 16
+	alertBatch := make([]*correlator.Alert, 0, batchSize)
+
 	for de.running {
-		alert, ok := de.alertQueue.Dequeue()
-		if !ok {
+		// Try to fill batch
+		for len(alertBatch) < batchSize {
+			alert, ok := de.alertQueue.Dequeue()
+			if !ok {
+				break
+			}
+			alertBatch = append(alertBatch, alert)
+		}
+
+		// If no alerts, yield and continue
+		if len(alertBatch) == 0 {
 			runtime.Gosched()
 			continue
 		}
 
-		// fmt.Printf("[DECISION] Alert received! Actor=%d, Flags=%d, PanicMode=%d\n", alert.ActorID, alert.Flags, alert.PanicMode)
-		incident := de.processAlert(alert)
-		if incident != nil {
-			// fmt.Printf("[DECISION] Executing ban for actor %d\n", incident.ActorID)
-			de.executeDecision(incident)
-		} else {
-			// fmt.Printf("[DECISION] No incident created\n")
+		// Process batch
+		for _, alert := range alertBatch {
+			// fmt.Printf("[DECISION] Alert received! Actor=%d, Flags=%d, PanicMode=%d\n", alert.ActorID, alert.Flags, alert.PanicMode)
+			incident := de.processAlert(alert)
+			if incident != nil {
+				// fmt.Printf("[DECISION] Executing ban for actor %d\n", incident.ActorID)
+				de.executeDecision(incident)
+			} else {
+				// fmt.Printf("[DECISION] No incident created\n")
+			}
 		}
+
+		// Clear batch for reuse
+		alertBatch = alertBatch[:0]
 	}
 }
 
