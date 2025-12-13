@@ -73,6 +73,17 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Override with environment variables if present
+	if token := os.Getenv("DISCORD_TOKEN"); token != "" {
+		cfg.Bot.Token = token
+	}
+	if clientID := os.Getenv("CLIENT_ID"); clientID != "" {
+		cfg.Bot.ClientID = clientID
+	}
+	if dbPath := os.Getenv("DATABASE_PATH"); dbPath != "" {
+		// Store database path if needed
+	}
+
 	GlobalConfig = &cfg
 	return &cfg, nil
 }
