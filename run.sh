@@ -168,13 +168,14 @@ build_binary() {
     go mod download 2>/dev/null || log_warning "Could not download dependencies"
     
     log_info "Cleaning previous build..."
-    rm -f ./antinuke ./bin/antinuke
+    rm -f ./antinuke ./bin/antinuke ./go-antinuke
     
     log_info "Building with MAXIMUM performance optimizations..."
     log_info "  - Stripped binary (-s -w)"
     log_info "  - Inlining disabled for predictable performance"
     log_info "  - Bounds checking optimization"
     log_info "  - Static linking"
+    log_info "  - Environment variable support enabled"
     
     # Detect architecture and set optimal flags
     ARCH=$(uname -m)
