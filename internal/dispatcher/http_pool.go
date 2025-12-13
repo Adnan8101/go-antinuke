@@ -17,28 +17,31 @@ func NewHTTPPool(size int) *HTTPPool {
 
 	for i := 0; i < size; i++ {
 		clients[i] = &fasthttp.Client{
-			// Ultra-low latency settings
-			MaxConnsPerHost:     200,
-			MaxIdleConnDuration: 60 * time.Second,
-			MaxConnDuration:     10 * time.Minute,
-			ReadTimeout:         2 * time.Second,
-			WriteTimeout:        2 * time.Second,
-			MaxConnWaitTimeout:  1 * time.Second,
+			// Absolute minimum latency settings
+			MaxConnsPerHost:     500,     // Increased for more parallel connections
+			MaxIdleConnDuration: 90 * time.Second,
+			MaxConnDuration:     0,       // Unlimited connection duration
+			ReadTimeout:         1 * time.Second,  // Faster timeout
+			WriteTimeout:        1 * time.Second,  // Faster timeout
+			MaxConnWaitTimeout:  500 * time.Millisecond,  // Reduced wait time
 
-			// Performance optimizations
-			ReadBufferSize:      8192,
-			WriteBufferSize:     8192,
-			MaxResponseBodySize: 1024 * 1024, // 1MB
+			// Maximum performance optimizations
+			ReadBufferSize:      16384,   // Increased buffer
+			WriteBufferSize:     16384,   // Increased buffer
+			MaxResponseBodySize: 2 * 1024 * 1024, // 2MB
 
-			// Disable compression for speed
-			DisableHeaderNamesNormalizing: false,
-			DisablePathNormalizing:        false,
-
-			// Keep connections alive
+			// Speed optimizations
+			DisableHeaderNamesNormalizing: true,  // Skip header normalization for speed
+			DisablePathNormalizing:        true,  // Skip path normalization for speed
+			
+			// No retries for minimum latency
 			MaxIdemponentCallAttempts: 1,
-
-			// TLS config
-			TLSConfig: nil, // Use default
+			
+			// Dial settings for fastest connection
+			DialDualStack: true,  // Try IPv4 and IPv6 simultaneously
+			
+			// TLS config - use default for now
+			TLSConfig: nil,
 		}
 	}
 
