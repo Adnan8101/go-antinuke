@@ -35,10 +35,56 @@ install_dependencies() {
     
     log_info "Checking for Go installation..."
     if ! command -v go &> /dev/null; then
-        log_error "Go is not installed!"
-        log_info "Please install Go from https://go.dev/dl/"
-        exit 1
+        log_warning "Go is not installed! Installing latest version..."
+        
+        # Detect architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+            x86_64)
+                GOARCH="amd64"
+                ;;
+            aarch64|arm64)
+                GOARCH="arm64"
+                ;;
+            *)
+                log_error "Unsupported architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        
+        # Get latest Go version
+        log_info "Fetching latest Go version..."
+        GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -n1)
+        log_info "Latest Go version: $GO_VERSION"
+        
+        # Download and install Go
+        log_info "Downloading Go ${GO_VERSION}..."
+        cd /tmp
+        wget -q --show-progress "https://go.dev/dl/${GO_VERSION}.linux-${GOARCH}.tar.gz"
+        
+        log_info "Installing Go to /usr/local/go..."
+        rm -rf /usr/local/go
+        tar -C /usr/local -xzf "${GO_VERSION}.linux-${GOARCH}.tar.gz"
+        
+        # Add Go to PATH
+        if ! grep -q "/usr/local/go/bin" /etc/profile; then
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+            echo 'export PATH=$PATH:$HOME/go/bin' >> /etc/profile
+        fi
+        
+        # Set PATH for current session
+        export PATH=$PATH:/usr/local/go/bin
+        export PATH=$PATH:$HOME/go/bin
+        
+        # Clean up
+        rm -f "${GO_VERSION}.linux-${GOARCH}.tar.gz"
+        
+        log_success "Go installed successfully!"
+        
+        # Return to project directory
+        cd - > /dev/null
     fi
+    
     log_success "Go version: $(go version)"
     
     log_info "Installing global Go dependencies..."
