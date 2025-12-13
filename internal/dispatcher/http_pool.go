@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"crypto/tls"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -15,33 +16,52 @@ type HTTPPool struct {
 func NewHTTPPool(size int) *HTTPPool {
 	clients := make([]*fasthttp.Client, size)
 
+	// Ultra-aggressive TLS config for minimum latency
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: false,
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         tls.VersionTLS13,
+		// Aggressive cipher suites for speed
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		},
+		// Session cache for faster reconnections
+		ClientSessionCache: tls.NewLRUClientSessionCache(128),
+		// Reuse sessions
+		SessionTicketsDisabled: false,
+	}
+
 	for i := 0; i < size; i++ {
 		clients[i] = &fasthttp.Client{
-			// Absolute minimum latency settings
-			MaxConnsPerHost:     500,     // Increased for more parallel connections
-			MaxIdleConnDuration: 90 * time.Second,
-			MaxConnDuration:     0,       // Unlimited connection duration
-			ReadTimeout:         1 * time.Second,  // Faster timeout
-			WriteTimeout:        1 * time.Second,  // Faster timeout
-			MaxConnWaitTimeout:  500 * time.Millisecond,  // Reduced wait time
+			// EXTREME performance settings
+			MaxConnsPerHost:     1000,    // Maximum connections
+			MaxIdleConnDuration: 120 * time.Second,
+			MaxConnDuration:     0,       // Never close connections
+			ReadTimeout:         800 * time.Millisecond,  // Ultra-fast timeout
+			WriteTimeout:        800 * time.Millisecond,
+			MaxConnWaitTimeout:  200 * time.Millisecond,  // Minimum wait
 
-			// Maximum performance optimizations
-			ReadBufferSize:      16384,   // Increased buffer
-			WriteBufferSize:     16384,   // Increased buffer
-			MaxResponseBodySize: 2 * 1024 * 1024, // 2MB
+			// Maximum buffer sizes for throughput
+			ReadBufferSize:      32768,   // 32KB
+			WriteBufferSize:     32768,   // 32KB
+			MaxResponseBodySize: 4 * 1024 * 1024, // 4MB
 
-			// Speed optimizations
-			DisableHeaderNamesNormalizing: true,  // Skip header normalization for speed
-			DisablePathNormalizing:        true,  // Skip path normalization for speed
+			// Skip ALL normalization for raw speed
+			DisableHeaderNamesNormalizing: true,
+			DisablePathNormalizing:        true,
 			
-			// No retries for minimum latency
+			// No retries - fail fast
 			MaxIdemponentCallAttempts: 1,
 			
-			// Dial settings for fastest connection
-			DialDualStack: true,  // Try IPv4 and IPv6 simultaneously
+			// Connection optimizations
+			DialDualStack: true,  // IPv4 + IPv6 simultaneously
 			
-			// TLS config - use default for now
-			TLSConfig: nil,
+			// TLS optimization
+			TLSConfig: tlsConfig,
+			
+			// Disable compression for speed
+			NoDefaultUserAgentHeader: true,
 		}
 	}
 
