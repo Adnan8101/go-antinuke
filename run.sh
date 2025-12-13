@@ -239,6 +239,15 @@ launch_bot() {
     
     OS=$(uname -s)
     
+    # Load environment variables from .env
+    if [ -f ".env" ]; then
+        log_info "Loading environment from .env file..."
+        export $(grep -v '^#' .env | xargs)
+        log_success "Environment variables loaded"
+    else
+        log_warning ".env file not found - using default configuration"
+    fi
+    
     # Export performance environment variables
     export GOGC=off                      # Disable GC
     export GOMAXPROCS=$CPU_CORES         # Use all cores
