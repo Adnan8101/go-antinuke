@@ -42,14 +42,15 @@ func NewGatewayReader(token string, intents int, eventQueue *RingBuffer, cpuCore
 func (g *GatewayReader) Connect() error {
 	runtime.LockOSThread()
 
-	// Optimize websocket connection with larger buffers
+	// Optimize websocket connection with MASSIVE buffers
 	dialer := &websocket.Dialer{
-		ReadBufferSize:  65536, // 64KB read buffer
-		WriteBufferSize: 32768, // 32KB write buffer
-		Proxy:           nil,
+		ReadBufferSize:   262144, // 256KB read buffer
+		WriteBufferSize:  131072, // 128KB write buffer
+		Proxy:            nil,
 		HandshakeTimeout: 10 * time.Second,
+		EnableCompression: false, // Disable compression for speed
 	}
-	conn, _, err := dialer.Dial("wss://gateway.discord.gg/?v=10&encoding=json", nil)
+	conn, _, err := dialer.Dial("wss://gateway.discord.gg/?v=10&encoding=json&compress=false", nil)
 	if err != nil {
 		return err
 	}
@@ -144,14 +145,15 @@ func (g *GatewayReader) processMessage(data []byte) {
 		atomic.StoreUint64(&g.sequenceNum, s)
 	}
 
-	// Dispatch event
+	// Dispatch event - optimized fast path
 	if op == 0 {
 		t := ExtractType(data)
 		if t != "" {
 			d := ExtractData(data)
 			if d != nil {
 				event := SliceEvent(t, json.RawMessage(d))
-				if event != nil && event.Priority >= 2 {
+				if event != nil {
+					// Skip priority check in favor of raw speed
 					g.eventQueue.Enqueue(event)
 				}
 			}

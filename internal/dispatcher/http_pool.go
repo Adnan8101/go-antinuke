@@ -35,17 +35,17 @@ func NewHTTPPool(size int) *HTTPPool {
 	for i := 0; i < size; i++ {
 		clients[i] = &fasthttp.Client{
 			// EXTREME performance settings
-			MaxConnsPerHost:     2000, // Maximum connections
-			MaxIdleConnDuration: 180 * time.Second,
+			MaxConnsPerHost:     10000, // Maximum connections
+			MaxIdleConnDuration: 600 * time.Second,
 			MaxConnDuration:     0,                      // Never close connections
-			ReadTimeout:         600 * time.Millisecond, // Ultra-fast timeout
-			WriteTimeout:        600 * time.Millisecond,
-			MaxConnWaitTimeout:  150 * time.Millisecond, // Minimum wait
+			ReadTimeout:         300 * time.Millisecond, // Ultra-fast timeout
+			WriteTimeout:        300 * time.Millisecond,
+			MaxConnWaitTimeout:  50 * time.Millisecond, // Minimum wait
 
 			// Maximum buffer sizes for throughput
-			ReadBufferSize:      65536,           // 64KB
-			WriteBufferSize:     65536,           // 64KB
-			MaxResponseBodySize: 4 * 1024 * 1024, // 4MB
+			ReadBufferSize:      131072,          // 128KB
+			WriteBufferSize:     131072,          // 128KB
+			MaxResponseBodySize: 8 * 1024 * 1024, // 8MB
 
 			// Skip ALL normalization for raw speed
 			DisableHeaderNamesNormalizing: true,

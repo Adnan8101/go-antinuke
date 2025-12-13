@@ -47,7 +47,7 @@ func (rw *RESTWorker) Start() {
 
 func (rw *RESTWorker) runLoop() {
 	// Batch processing for better throughput
-	const batchSize = 8
+	const batchSize = 32
 	jobBatch := make([]*decision.Job, 0, batchSize)
 
 	for rw.running {
@@ -60,9 +60,8 @@ func (rw *RESTWorker) runLoop() {
 			jobBatch = append(jobBatch, job)
 		}
 
-		// If no jobs, yield and continue
+		// If no jobs, continue (spin-wait for lowest latency)
 		if len(jobBatch) == 0 {
-			runtime.Gosched()
 			continue
 		}
 

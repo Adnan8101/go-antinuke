@@ -57,7 +57,7 @@ func (c *Correlator) runLoop() {
 	profileStore := config.GetProfileStore()
 
 	// Batch processing for better throughput
-	const batchSize = 16
+	const batchSize = 64
 	eventBatch := make([]*ingest.Event, 0, batchSize)
 
 	for c.running {
@@ -70,9 +70,8 @@ func (c *Correlator) runLoop() {
 			eventBatch = append(eventBatch, event)
 		}
 
-		// If no events, yield and continue
+		// If no events, continue (spin-wait for lowest latency)
 		if len(eventBatch) == 0 {
-			runtime.Gosched()
 			continue
 		}
 
@@ -146,8 +145,6 @@ func (c *Correlator) processEvent(event *ingest.Event, guildMap *state.GuildIDMa
 
 	// PANIC MODE: Ultra-fast path - skip all unnecessary operations
 	if profile.PanicMode {
-		detectionStart := util.NowMono()
-
 		// CRITICAL: Mark actor as triggered+banned IMMEDIATELY to block race conditions
 		as.SetTriggered(actorIndex, true)
 		as.SetBanned(actorIndex, true)
@@ -161,17 +158,17 @@ func (c *Correlator) processEvent(event *ingest.Event, guildMap *state.GuildIDMa
 			flag = detectors.FlagChannelTriggered
 		case ingest.EventTypeRoleCreate, ingest.EventTypeRoleDelete:
 			flag = detectors.FlagRoleTriggered
+		default:
+			flag = detectors.FlagBanTriggered // Default to ban for any malicious event
 		}
 
-		detectionTime := util.NowMono() - detectionStart
-
-		// Queue alert immediately
+		// Queue alert immediately with zero-cost timestamp
 		alert := c.alertQueue.Get()
 		alert.GuildID = event.GuildID
 		alert.ActorID = event.ActorID
 		alert.EventType = event.EventType
 		alert.Flags = flag
-		alert.Timestamp = detectionTime
+		alert.Timestamp = 0 // Skip timing in panic mode for max speed
 		alert.Severity = detectors.GetSeverityFromFlags(flag)
 		alert.PanicMode = 1
 		c.alertQueue.Enqueue(alert)

@@ -90,10 +90,14 @@ func (b *Bootstrap) loadConfig() error {
 }
 
 func (b *Bootstrap) initializeRuntime() error {
-	if b.Config.Runtime.DisableGC {
-		debug.SetGCPercent(-1)
-		logging.Info("GC disabled")
-	}
+	// EXTREME PERFORMANCE MODE
+	debug.SetGCPercent(-1) // Disable GC completely
+	logging.Info("GC disabled for maximum performance")
+
+	// Set memory ballast for stable heap
+	ballast := make([]byte, 100<<20) // 100MB ballast
+	_ = ballast
+	logging.Info("Memory ballast allocated")
 
 	if b.Config.Runtime.MemoryLock {
 		if err := memory.MlockAll(); err != nil {

@@ -30,6 +30,11 @@ func NewAlertQueue(size uint32) *AlertQueue {
 		size = nextPowerOf2Alert(size)
 	}
 
+	// Ensure minimum size for high throughput
+	if size < 16384 {
+		size = 16384
+	}
+
 	return &AlertQueue{
 		alerts: make([]Alert, size),
 		mask:   size - 1,

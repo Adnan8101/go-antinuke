@@ -1,10 +1,16 @@
-.PHONY: build run clean test docker
+.PHONY: build run clean test docker fast
 
 build:
 	@echo "Building anti-nuke engine..."
 	@go mod tidy
 	@go build -o bin/antinuke ./cmd/main.go
 	@echo "Build complete: bin/antinuke"
+
+fast:
+	@echo "Building ULTRA-OPTIMIZED anti-nuke engine..."
+	@go mod tidy
+	@go build -ldflags="-s -w" -gcflags="all=-l -B -C" -o bin/antinuke ./cmd/main.go
+	@echo "Ultra-fast build complete: bin/antinuke"
 
 run: build
 	@echo "Starting engine..."

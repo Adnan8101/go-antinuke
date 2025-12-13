@@ -48,7 +48,7 @@ func (de *DecisionEngine) Start() {
 
 func (de *DecisionEngine) runLoop() {
 	// Batch processing for better throughput
-	const batchSize = 16
+	const batchSize = 64
 	alertBatch := make([]*correlator.Alert, 0, batchSize)
 
 	for de.running {
@@ -61,9 +61,8 @@ func (de *DecisionEngine) runLoop() {
 			alertBatch = append(alertBatch, alert)
 		}
 
-		// If no alerts, yield and continue
+		// If no alerts, continue (spin-wait for lowest latency)
 		if len(alertBatch) == 0 {
-			runtime.Gosched()
 			continue
 		}
 
@@ -301,6 +300,10 @@ type JobQueue struct {
 func NewJobQueue(size uint32) *JobQueue {
 	if size&(size-1) != 0 {
 		size = nextPowerOf2Job(size)
+	}
+	// Ensure minimum size for high throughput
+	if size < 8192 {
+		size = 8192
 	}
 	return &JobQueue{
 		jobs: make([]Job, size),

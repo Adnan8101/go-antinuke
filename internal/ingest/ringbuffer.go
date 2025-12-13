@@ -18,8 +18,8 @@ func NewRingBuffer(size uint32) *RingBuffer {
 	}
 
 	// Ensure minimum buffer size for high throughput
-	if size < 8192 {
-		size = 8192
+	if size < 65536 {
+		size = 65536 // 64K events minimum
 	}
 
 	return &RingBuffer{

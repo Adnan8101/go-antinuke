@@ -20,32 +20,39 @@ var globalDB *Database
 
 // Initialize creates and initializes the SQLite database
 func Initialize(dbPath string) error {
-	db, err := sql.Open("sqlite", dbPath)
+	// Use in-memory database for MAXIMUM speed
+	connString := "file::memory:?cache=shared"
+	if dbPath != "" && dbPath != ":memory:" {
+		// If specific path requested, use it with ultra-fast settings
+		connString = dbPath + "?cache=shared&mode=rwc&_journal_mode=OFF&_synchronous=OFF"
+	}
+	
+	db, err := sql.Open("sqlite", connString)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(50)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetMaxOpenConns(100)
+	db.SetMaxIdleConns(50)
+	db.SetConnMaxLifetime(15 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	_, err = db.Exec("PRAGMA journal_mode=OFF")
 	if err != nil {
-		return fmt.Errorf("failed to enable WAL: %w", err)
+		return fmt.Errorf("failed to disable WAL: %w", err)
 	}
 
-	_, err = db.Exec("PRAGMA synchronous=NORMAL")
+	_, err = db.Exec("PRAGMA synchronous=OFF")
 	if err != nil {
 		return fmt.Errorf("failed to set synchronous mode: %w", err)
 	}
 
-	// Additional performance optimizations
-	_, err = db.Exec("PRAGMA cache_size=-64000") // 64MB cache
+	// EXTREME performance optimizations
+	_, err = db.Exec("PRAGMA cache_size=-256000") // 256MB cache
 	if err != nil {
 		return fmt.Errorf("failed to set cache size: %w", err)
 	}
@@ -55,9 +62,24 @@ func Initialize(dbPath string) error {
 		return fmt.Errorf("failed to set temp store: %w", err)
 	}
 
-	_, err = db.Exec("PRAGMA mmap_size=268435456") // 256MB memory-mapped I/O
+	_, err = db.Exec("PRAGMA mmap_size=1073741824") // 1GB memory-mapped I/O
 	if err != nil {
 		return fmt.Errorf("failed to set mmap size: %w", err)
+	}
+
+	_, err = db.Exec("PRAGMA page_size=65536") // 64KB pages for better I/O
+	if err != nil {
+		return fmt.Errorf("failed to set page size: %w", err)
+	}
+
+	_, err = db.Exec("PRAGMA locking_mode=EXCLUSIVE") // Exclusive lock for speed
+	if err != nil {
+		return fmt.Errorf("failed to set locking mode: %w", err)
+	}
+
+	_, err = db.Exec("PRAGMA auto_vacuum=NONE") // Disable auto vacuum
+	if err != nil {
+		return fmt.Errorf("failed to disable auto vacuum: %w", err)
 	}
 
 	globalDB = &Database{db: db}

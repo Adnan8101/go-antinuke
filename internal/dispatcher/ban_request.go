@@ -1,7 +1,6 @@
 package dispatcher
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -16,6 +15,8 @@ type BanRequestExecutor struct {
 	httpPool    *HTTPPool
 	rateLimiter *RateLimitMonitor
 	token       string
+	tokenHeader string // Pre-computed auth header
+	banPayload  []byte // Pre-allocated payload
 }
 
 func NewBanRequestExecutor(httpPool *HTTPPool, rateLimiter *RateLimitMonitor) *BanRequestExecutor {
@@ -24,6 +25,8 @@ func NewBanRequestExecutor(httpPool *HTTPPool, rateLimiter *RateLimitMonitor) *B
 		httpPool:    httpPool,
 		rateLimiter: rateLimiter,
 		token:       cfg.Bot.Token,
+		tokenHeader: "Bot " + cfg.Bot.Token, // Pre-computed
+		banPayload:  []byte(`{"delete_message_seconds":0}`), // Pre-allocated
 	}
 }
 
@@ -36,12 +39,6 @@ func (bre *BanRequestExecutor) ExecuteBan(guildID, userID uint64, reason string)
 
 	url := fmt.Sprintf("https://discord.com/api/v10/guilds/%d/bans/%d", guildID, userID)
 
-	payload := map[string]interface{}{
-		"delete_message_seconds": 0,
-	}
-
-	body, _ := json.Marshal(payload)
-
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -49,17 +46,17 @@ func (bre *BanRequestExecutor) ExecuteBan(guildID, userID uint64, reason string)
 
 	req.SetRequestURI(url)
 	req.Header.SetMethod("PUT")
-	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", bre.token))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", bre.tokenHeader) // Use pre-computed
+	req.Header.SetContentType("application/json")
 	req.Header.Set("X-Audit-Log-Reason", reason)
-	req.Header.Set("Connection", "keep-alive")
-	req.SetBody(body)
+	req.Header.Set("Connection", "keep-alive") // Keep-alive
+	req.SetBody(bre.banPayload) // Use pre-allocated
 
 	client := bre.httpPool.GetClient()
 	requestSentTime := time.Since(startTime)
 
 	// Ultra-fast timeout for minimum latency
-	err := client.DoTimeout(req, resp, 1500*time.Millisecond)
+	err := client.DoTimeout(req, resp, 1000*time.Millisecond)
 	if err != nil {
 		return 0, err
 	}
