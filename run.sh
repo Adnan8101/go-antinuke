@@ -178,14 +178,13 @@ build_binary() {
     
     # Detect architecture and set optimal flags
     ARCH=$(uname -m)
-    BUILD_FLAGS="-ldflags=-s -w -gcflags=all=-l -B"
     
     if [[ "$ARCH" == "x86_64" ]]; then
         log_info "  - x86_64 optimizations enabled"
-        GOAMD64=v3 go build $BUILD_FLAGS -o antinuke ./cmd/main.go
+        GOAMD64=v3 go build -ldflags="-s -w" -gcflags="all=-l -B" -o antinuke ./cmd/main.go
     else
         log_info "  - ARM64 optimizations enabled"  
-        go build $BUILD_FLAGS -o antinuke ./cmd/main.go
+        go build -ldflags="-s -w" -gcflags="all=-l -B" -o antinuke ./cmd/main.go
     fi
     
     if [ -f "./antinuke" ]; then
