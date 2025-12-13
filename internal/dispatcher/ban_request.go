@@ -52,7 +52,7 @@ func (bre *BanRequestExecutor) ExecuteBan(guildID, userID uint64, reason string)
 	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", bre.token))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Audit-Log-Reason", reason)
-	req.Header.SetConnectionClose(false)  // Keep connection alive
+	req.Header.Set("Connection", "keep-alive")
 	req.SetBody(body)
 
 	client := bre.httpPool.GetClient()
@@ -119,7 +119,7 @@ func (bre *BanRequestExecutor) ExecuteKick(guildID, userID uint64, reason string
 	req.Header.SetMethod("DELETE")
 	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", bre.token))
 	req.Header.Set("X-Audit-Log-Reason", reason)
-	req.Header.SetConnectionClose(false)  // Keep connection alive
+	req.Header.Set("Connection", "keep-alive")
 
 	client := bre.httpPool.GetClient()
 	err := client.DoTimeout(req, resp, 1500*time.Millisecond)
