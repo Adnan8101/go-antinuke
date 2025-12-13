@@ -111,6 +111,59 @@ optimize_system() {
 build_binary() {
     log_step 2 "BUILDING ULTRA-OPTIMIZED BINARY"
     
+    # Check if Go is installed
+    if ! command -v go &> /dev/null; then
+        log_warning "Go is not installed! Installing latest version..."
+        
+        # Detect architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+            x86_64)
+                GOARCH="amd64"
+                ;;
+            aarch64|arm64)
+                GOARCH="arm64"
+                ;;
+            *)
+                log_error "Unsupported architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        
+        # Get latest Go version
+        log_info "Fetching latest Go version..."
+        GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -n1)
+        log_info "Latest Go version: $GO_VERSION"
+        
+        # Download and install Go
+        log_info "Downloading Go ${GO_VERSION}..."
+        cd /tmp
+        wget -q --show-progress "https://go.dev/dl/${GO_VERSION}.linux-${GOARCH}.tar.gz" || {
+            log_error "Failed to download Go"
+            exit 1
+        }
+        
+        log_info "Installing Go to /usr/local/go..."
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf "${GO_VERSION}.linux-${GOARCH}.tar.gz"
+        
+        # Add Go to PATH
+        export PATH=$PATH:/usr/local/go/bin
+        export PATH=$PATH:$HOME/go/bin
+        
+        # Add to profile if not already there
+        if ! grep -q "/usr/local/go/bin" ~/.profile 2>/dev/null; then
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+            echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.profile
+        fi
+        
+        log_success "Go ${GO_VERSION} installed successfully"
+        cd - > /dev/null
+    else
+        GO_VER=$(go version | awk '{print $3}')
+        log_success "Go already installed: $GO_VER"
+    fi
+    
     log_info "Ensuring Go dependencies..."
     go mod download 2>/dev/null || log_warning "Could not download dependencies"
     
